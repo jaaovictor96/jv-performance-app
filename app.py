@@ -2,6 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
+import plotly.express as px
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
@@ -172,3 +173,31 @@ else:
 
     except Exception as e:
         st.error(f"Erro ao carregar dados: {e}")
+
+    st.markdown("### 📈 EVOLUÇÃO DE CARGA")
+
+# Pegando os dados históricos do aluno
+df_historico = conn.read(worksheet="registros")
+df_aluno = df_historico[df_historico['email_aluno'] == st.session_state.email]
+
+if not df_aluno.empty:
+    # Seleção do exercício para o gráfico
+    ex_visto = st.selectbox("Analisar evolução de:", df_aluno['exercicio'].unique())
+    df_grafico = df_aluno[df_aluno['exercicio'] == ex_visto].sort_values('data')
+
+    # Criando o gráfico com a cara do Team JV
+    fig = px.line(df_grafico, x='data', y='carga', 
+                  title=f"Progresso: {ex_visto}",
+                  markers=True)
+    
+    # Customizando cores (Dourado e Dark)
+    fig.update_traces(line_color='#F9C03D', marker=dict(size=10, color='#F9C03D'))
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font_color='#e5e2e1',
+        xaxis=dict(showgrid=False),
+        yaxis=dict(showgrid=True, gridcolor='#333')
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
