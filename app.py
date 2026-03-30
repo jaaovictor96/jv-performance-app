@@ -135,22 +135,38 @@ else:
         # ==========================
         st.markdown("<h2 style='font-family: Space Grotesk; color: #F9C03D;'>ANÁLISE DE PERFORMANCE</h2>", unsafe_allow_html=True)
         
+        # 1. Lemos a aba de usuários para ter a lista COMPLETA de alunos
         df_usuarios = conn.read(worksheet="usuarios", ttl=0)
+        # 2. Lemos a aba de registros para ver os treinos realizados
         df_coach = conn.read(worksheet="registros", ttl=0)
-        if not df_coach.empty:
-            aluno_sel = st.selectbox("Selecione o Aluno:", df_coach['email_aluno'].unique())
-            df_aluno = df_coach[df_coach['email_aluno'] == aluno_sel].copy()
-            df_aluno['data'] = pd.to_datetime(df_aluno['data'], dayfirst=True)
+        
+        if not df_usuarios.empty:
+            # Puxamos todos os e-mails da aba usuarios (menos o seu, se quiser filtrar)
+            lista_todos_alunos = df_usuarios['email'].astype(str).str.strip().str.lower().unique()
             
-            exercicio_sel = st.selectbox("Exercício:", df_aluno['exercicio'].unique())
-            df_prog = df_aluno[df_aluno['exercicio'] == exercicio_sel].sort_values('data')
+            aluno_sel = st.selectbox("Selecione o Aluno:", lista_todos_alunos)
             
-            fig = px.line(df_prog, x='data', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
-            fig.update_traces(line_color='#F9C03D')
-            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
-            st.plotly_chart(fig, use_container_width=True)
+            # Verificamos se esse aluno selecionado já tem treinos registrados
+            if not df_coach.empty:
+                df_coach['email_aluno'] = df_coach['email_aluno'].astype(str).str.strip().str.lower()
+                df_aluno = df_coach[df_coach['email_aluno'] == aluno_sel].copy()
+                
+                if not df_aluno.empty:
+                    df_aluno['data'] = pd.to_datetime(df_aluno['data'], dayfirst=True)
+                    
+                    exercicio_sel = st.selectbox("Exercício:", df_aluno['exercicio'].unique())
+                    df_prog = df_aluno[df_aluno['exercicio'] == exercicio_sel].sort_values('data')
+                    
+                    fig = px.line(df_prog, x='data', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
+                    fig.update_traces(line_color='#F9C03D')
+                    fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info(f"O aluno {aluno_sel} ainda não registrou nenhum treino.")
+            else:
+                st.warning("A base de registros está vazia.")
         else:
-            st.info("Nenhum registro encontrado.")
+            st.error("Nenhum usuário cadastrado na aba 'usuarios'.")
 
     else:
         # ==========================
