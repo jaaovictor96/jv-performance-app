@@ -135,6 +135,7 @@ else:
         # ==========================
         st.markdown("<h2 style='font-family: Space Grotesk; color: #F9C03D;'>ANÁLISE DE PERFORMANCE</h2>", unsafe_allow_html=True)
         
+        df_usuarios = conn.read(worksheet="usuarios", ttl=0)
         df_coach = conn.read(worksheet="registros", ttl=0)
         if not df_coach.empty:
             aluno_sel = st.selectbox("Selecione o Aluno:", df_coach['email_aluno'].unique())
