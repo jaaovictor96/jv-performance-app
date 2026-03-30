@@ -183,7 +183,7 @@ else:
                                 <h4 style="margin: 5px 0; color: white; font-family: Space Grotesk; text-transform: uppercase;">{row['exercicio']}</h4>
                                 <p style="color: #888; font-size: 12px; margin: 0;">META: {int(float(row['series'])) if pd.notnull(row['series']) else 0} SÉRIES x {str(row['reps']).replace('', '') if pd.notnull(row['reps']) else "0"} REPS</p>
                                 <p style="color: #F9C03D; font-size: 11px; margin-top: 5px; opacity: 0.8;">Última carga: {carga_anterior} kg</p>
-                            </div>.0
+                            </div>
                         """, unsafe_allow_html=True)
                         
                         video_url = row.get('video_url', '') 
