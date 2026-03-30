@@ -100,8 +100,6 @@ else:
 
             with st.form("registro_cargas"):
                 lista_registros = []
-                
-# --- DENTRO DO LOOP DE EXERCÍCIOS (for idx, row in exercicios.iterrows():) ---
 
                 for idx, row in exercicios.iterrows():
                     # Lógica da última carga
@@ -143,11 +141,19 @@ else:
 
                     # 3. CAMPO DE CARGA
                     carga = st.number_input(f"Carga (kg) - {row['exercicio']}", key=f"kg_{idx}", step=0.5, min_value=0.0, value=carga_anterior)
-                    
-                    # ... (resto da lógica de lista_registros permanece igual)
                 
+                    # MONTAGEM DA LINHA (Garantindo que os dados entrem na lista)
+                    dados_exercicio = {
+                        "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                        "email_aluno": st.session_state.email,
+                        "treino": selecao_treino,
+                        "exercicio": row['exercicio'],
+                        "carga": carga
+                    }
+                    lista_registros.append(dados_exercicio)
+
                 # --- ÁREA FINAL DO FORMULÁRIO (NOTAS E ENVIO) ---
-                notas = st.text_area("Notas do Atleta", placeholder="Dificuldade, cansaço, etc.")
+                notas = st.text_area("Notas do Atleta", placeholder="Como foi o treino hoje? Dificuldade, cansaço, etc.")
 
                 if st.form_submit_button("FINALIZAR TREINO"):
                     try:
