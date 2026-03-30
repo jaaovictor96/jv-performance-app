@@ -149,38 +149,42 @@ else:
                 # --- ÁREA FINAL DO FORMULÁRIO (NOTAS E ENVIO) ---
                 notas = st.text_area("Notas do Atleta", placeholder="Dificuldade, cansaço, etc.")
 
-                if st.form_submit_button("FINALIZAR E ENVIAR"):
+                if st.form_submit_button("FINALIZAR TREINO"):
                     try:
-                        # 1. Criar o DataFrame com os novos dados
-                        df_novos = pd.DataFrame(lista_registros)
-                        df_novos["comentario"] = notas  # Adiciona a nota em todas as linhas
+                        # 1. Criar o DataFrame com os dados atuais da lista
+                        df_para_enviar = pd.DataFrame(lista_registros)
+                        
+                        # Adiciona a nota em todas as linhas do envio atual
+                        df_para_enviar["comentario"] = notas
 
-                        # 2. Ler os registros atuais SEM CACHE
-                        # Importante: Verifique se o nome da aba é exatamente "registros"
-                        registros_atuais = conn.read(worksheet="registros", ttl=0)
-                        
-                        # 3. Garantir que as colunas existam (evita erro se a planilha estiver vazia)
-                        if registros_atuais is None or registros_atuais.empty:
-                            df_final = df_novos
-                        else:
-                            # 4. Concatenar (Colocar os novos registros abaixo dos antigos)
-                            df_final = pd.concat([registros_atuais, df_novos], ignore_index=True)
-                        
-                        # 5. Comando de escrita forçada
-                        conn.update(worksheet="registros", data=df_final)
-                        
-                        # 6. Limpeza profunda de cache para a próxima leitura
+                        # 2. Tentar ler os registros existentes (sem cache) para concatenar
+                        try:
+                            registros_existentes = conn.read(worksheet="registros", ttl=0)
+                            # Remove linhas totalmente vazias que o Sheets às vezes gera
+                            registros_existentes = registros_existentes.dropna(how='all')
+                            df_final = pd.concat([registros_existentes, df_para_enviar], ignore_index=True)
+                        except:
+                            # Se a aba estiver vazia ou der erro na leitura, envia apenas os novos
+                            df_final = df_para_enviar
+
+                        # 3. EXECUTAR A ATUALIZAÇÃO
+                        # Forçamos o Streamlit a "esquecer" os dados antigos antes de gravar
                         st.cache_data.clear()
                         
-                        st.success("✅ Treino registrado com sucesso!")
+                        # O comando de atualização propriamente dito
+                        conn.update(worksheet="registros", data=df_final)
+                        
+                        # 4. FEEDBACK E RESET
+                        st.success("✅ REGISTRO ENVIADO!")
                         st.balloons()
                         
-                        # Delay para o aluno ver o sucesso antes do reset
+                        # Espera 2 segundos para o Google processar a escrita
                         import time
                         time.sleep(2)
                         st.rerun()
 
                     except Exception as e:
-                        st.error(f"Erro técnico ao gravar: {e}")
+                        st.error(f"ERRO DE CONEXÃO: {e}")
+                        st.info("Verifique se a aba 'registros' existe e se as colunas estão corretas.")
 
     except Exception as e: st.error(f"Erro ao carregar dados: {e}")
