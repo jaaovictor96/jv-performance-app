@@ -108,14 +108,15 @@ else:
                     series_int = int(float(row['series'])) if pd.notnull(row['series']) else 0
                     reps_clean = str(row['reps']).replace('.0', '') if pd.notnull(row['reps']) else "0"
 
-                    # --- LÓGICA DO VÍDEO (AQUI ENTRA A MUDANÇA) ---
-                    # Verifica se existe a coluna 'video_url' na sua planilha_treinos
+                    # --- LÓGICA DO VÍDEO (MODO PLAYER LIMPO) ---
                     video_url = row.get('video_url', '') 
                     if pd.notnull(video_url) and str(video_url).startswith('http'):
-                        # Se houver vídeo, o nome vira um link clicável
-                        nome_exercicio_display = f'<a href="{video_url}" target="_blank" style="color: white; text-decoration: none; border-bottom: 1px dashed #F9C03D;">{row["exercicio"]} 🎬</a>'
+                        # Tratamento do link: removemos o final /view e forçamos o /preview
+                        # Isso faz o Google Drive abrir apenas o player de vídeo preto
+                        video_clean = video_url.split('?')[0].replace('/view', '/preview').replace('/edit', '/preview')
+                        
+                        nome_exercicio_display = f'<a href="{video_clean}" target="_blank" style="color: white; text-decoration: none; border-bottom: 1px dashed #F9C03D;">{row["exercicio"]} 🎬</a>'
                     else:
-                        # Se não houver vídeo, exibe apenas o nome normal
                         nome_exercicio_display = row['exercicio']
 
                     st.markdown(f"""
@@ -136,6 +137,8 @@ else:
                         "exercicio": row['exercicio'],
                         "carga": carga
                     })
+                
+                # ... (Restante do formulário permanece igual)
                 
                 notas = st.text_area("Notas do Atleta", placeholder="Dificuldade, cansaço, etc.")
                 if st.form_submit_button("FINALIZAR E ENVIAR"):
