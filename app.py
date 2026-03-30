@@ -77,10 +77,10 @@ else:
 
     st.markdown("<h2 style='font-family: Space Grotesk; font-size: 2.5rem; font-weight: 900; line-height: 1;'>PROTOCOLO <br><span style='color: #F9C03D;'>DIÁRIO</span></h2>", unsafe_allow_html=True)
     # Botão de atualizar manual (discreto no estilo do seu app)
-if st.button("🔄 ATUALIZAR PLANILHA"):
-    st.cache_data.clear() # Limpa todo o cache do app
-    st.rerun()
-    
+    if st.button("🔄 ATUALIZAR PLANILHA"):
+        st.cache_data.clear() # Limpa todo o cache do app
+        st.rerun()
+
     try:
         df_treinos = conn.read(worksheet="planilha_treinos", ttl=0)
         df_treinos['email_aluno'] = df_treinos['email_aluno'].astype(str).str.strip().str.lower()
