@@ -164,7 +164,7 @@ else:
                         df_final = pd.concat([registros_atuais, df_novos], ignore_index=True)
                         
                         # 4. Atualiza a planilha
-                        conn.update(worksheet="registros", data=df_final)
+                        conn.update(worksheet="registros", data=df_final, ttl=0)
                         
                         # 5. Limpa o cache para a próxima leitura vir atualizada
                         st.cache_data.clear()
