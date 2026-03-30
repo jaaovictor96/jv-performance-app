@@ -2,6 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
+import plotly.express as px
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
@@ -66,6 +67,77 @@ if not st.session_state.logado:
                     st.rerun()
                 else: st.error("Credenciais inválidas.")
             except: st.error("Erro de conexão.")
+
+EMAIL_COACH = "jaaovictor96@gmail.com"
+
+# --- NA SIDEBAR ---
+st.sidebar.divider()
+
+# Verificamos se o e-mail logado é o seu (limpando espaços e letras maiúsculas)
+email_logado = st.session_state.get('email', '').strip().lower()
+
+if email_logado == EMAIL_COACH.lower():
+    st.sidebar.subheader("🛠 PAINEL DO COACH")
+    acesso_coach = st.sidebar.checkbox("Visualizar Métricas")
+    
+    if acesso_coach:
+        st.markdown("### 📊 CENTRAL DE PERFORMANCE JV")
+        
+        # 1. Carregar dados de registros
+        df_coach = conn.read(worksheet="registros", ttl=0)
+        
+        if not df_coach.empty:
+            # Filtros de busca
+            lista_alunos = df_coach['email_aluno'].unique()
+            aluno_sel = st.selectbox("Selecione o Aluno:", lista_alunos)
+            
+            # Filtrar dados do aluno selecionado
+            df_aluno = df_coach[df_coach['email_aluno'] == aluno_sel].copy()
+            df_aluno['data'] = pd.to_datetime(df_aluno['data'], dayfirst=True)
+            
+            # --- KPIs RÁPIDOS ---
+            col1, col2 = st.columns(2)
+            with col1:
+                total_treinos = df_aluno['data'].dt.date.nunique()
+                st.metric("Treinos Realizados", total_treinos)
+            with col2:
+                ultimo_treino = df_aluno['data'].max().strftime('%d/%m/%Y')
+                st.metric("Último Check-in", ultimo_treino)
+
+            # --- GRÁFICO DE PROGRESSÃO ---
+            st.markdown("### Progressão por Exercício")
+            exercicio_sel = st.selectbox("Escolha o Exercício:", df_aluno['exercicio'].unique())
+            
+            df_progresso = df_aluno[df_aluno['exercicio'] == exercicio_sel].sort_values('data')
+            
+            fig = px.line(
+                df_progresso, 
+                x='data', 
+                y='carga',
+                title=f'Evolução: {exercicio_sel}',
+                markers=True,
+                line_shape='spline',
+                color_discrete_sequence=['#F9C03D'] # Usando o seu amarelo padrão
+            )
+            
+            fig.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font_color="white",
+                xaxis_title="Data do Treino",
+                yaxis_title="Carga (kg)"
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+
+            # --- TABELA DE NOTAS/COMENTÁRIOS ---
+            with st.expander("📝 Ver Comentários do Atleta"):
+                df_notas = df_aluno[df_aluno['comentario'].str.len() > 2][['data', 'comentario']].drop_duplicates()
+                st.table(df_notas)
+        else:
+            st.info("Ainda não há registros para analisar.")
+    else:
+        st.warning("Aguardando senha correta...")            
 
 # --- ÁREA INTERNA (ÁREA DO ALUNO) ---
 else:
