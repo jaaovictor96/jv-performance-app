@@ -22,6 +22,7 @@ st.markdown(f"""
         font-family: 'Space Grotesk', sans-serif !important;
         font-weight: 900 !important;
         letter-spacing: -1px !important;
+        line-height: 1 !important;
         text-align: center !important;
         text-transform: uppercase;
         font-size: 2.5rem !important;
