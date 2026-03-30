@@ -5,7 +5,7 @@ from datetime import datetime
 import plotly.express as px
 import time
 
-# --- 1. CONFIGURAÇÃO E CSS (ESTILO ELITE ORIGINAL) ---
+# --- 1. CONFIGURAÇÃO E CSS (RESTALREI O ORIGINAL 100%) ---
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
 
 URL_PLANILHA = "SUA_URL_AQUI"
@@ -41,6 +41,33 @@ st.markdown(f"""
     .exercise-card {{ background-color: #201f1f; padding: 20px; border-radius: 12px; border-left: 4px solid #F9C03D; margin-bottom: 15px; }}
     </style>
 """, unsafe_allow_html=True)
+
+# --- INICIALIZAÇÃO DE ESTADO ---
+if 'logado' not in st.session_state:
+    st.session_state.logado = False
+    st.session_state.email = ""
+
+# --- TELA DE LOGIN ---
+if not st.session_state.logado:
+    st.markdown("<h1 class='main-title'>TEAM JV FERREIRA</h1>", unsafe_allow_html=True)
+    st.markdown("<p class='sub-title'>AESTHETIC & PERFORMANCE LAB<br>CONSULTORIA ONLINE</p>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 4, 1])
+    with col2:
+        email_input = st.text_input("📧 E-mail do Atleta", placeholder="atleta@exemplo.com").strip().lower()
+        senha_input = st.text_input("🔒 Senha", type="password", placeholder="••••••").strip()
+        
+        if st.button("ACESSAR"):
+            try:
+                usuarios = conn.read(worksheet="usuarios")
+                usuarios['email'] = usuarios['email'].astype(str).str.strip().str.lower()
+                usuarios['senha'] = usuarios['senha'].astype(str).str.strip()
+                if ((usuarios['email'] == email_input) & (usuarios['senha'] == senha_input)).any():
+                    st.session_state.logado = True
+                    st.session_state.email = email_input
+                    st.rerun()
+                else: st.error("Credenciais inválidas.")
+            except: st.error("Erro de conexão.")
 
 # --- 2. FUNÇÃO: TELA DO ALUNO (TREINO) ---
 def mostrar_tela_treino():
