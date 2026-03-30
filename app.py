@@ -78,6 +78,37 @@ else:
     if st.sidebar.button("Sair"):
         st.session_state.logado = False
         st.rerun()
+    
+    st.sidebar.divider()
+    with st.sidebar.expander("🔑 Alterar Minha Senha"):
+        nova_senha = st.text_input("Nova Senha", type="password", key="new_pass")
+        confirma_senha = st.text_input("Confirme a Nova Senha", type="password", key="conf_pass")
+        
+        if st.button("ATUALIZAR SENHA"):
+            if nova_senha == confirma_senha and len(nova_senha) >= 4:
+                try:
+                    # 1. Lê a base de usuários atual
+                    df_usuarios = conn.read(worksheet="usuarios", ttl=0)
+                    
+                    # 2. Localiza o usuário logado e altera a senha no DataFrame
+                    mask = df_usuarios['email'].astype(str).str.strip().str.lower() == st.session_state.email.lower()
+                    
+                    if mask.any():
+                        df_usuarios.loc[mask, 'senha'] = str(nova_senha).strip()
+                        
+                        # 3. Sobe a planilha inteira atualizada
+                        conn.update(worksheet="usuarios", data=df_usuarios)
+                        st.sidebar.success("Senha alterada com sucesso!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.sidebar.error("Usuário não encontrado.")
+                except Exception as e:
+                    st.sidebar.error(f"Erro ao conectar: {e}")
+            elif len(nova_senha) < 4:
+                st.sidebar.warning("A senha deve ter pelo menos 4 caracteres.")
+            else:
+                st.sidebar.error("As senhas não coincidem.")
 
     # Lógica de troca de tela para o Coach
     ativar_dashboard = False
