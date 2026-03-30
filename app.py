@@ -5,22 +5,40 @@ from datetime import datetime
 import plotly.express as px
 import time
 
-# --- 1. CONFIGURAÇÃO E CSS ---
+# --- 1. CONFIGURAÇÃO E CSS (ESTILO ELITE ORIGINAL) ---
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
 
-# URL e Email Mestre
 URL_PLANILHA = "SUA_URL_AQUI"
 EMAIL_COACH = "jaaovictor96@gmail.com"
 
 conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 
-st.markdown("""
+st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Space+Grotesk:wght@700;900&display=swap');
-    .stApp { background-color: #131313; color: #e5e2e1; }
-    .main-title { color: #F9C03D !important; font-family: 'Space Grotesk', sans-serif !important; font-weight: 900 !important; text-align: center !important; text-transform: uppercase; font-size: 2.5rem !important; }
-    .exercise-card { background-color: #201f1f; padding: 20px; border-radius: 12px; border-left: 4px solid #F9C03D; margin-bottom: 15px; }
-    div.stButton > button { background-color: transparent !important; color: #ffffff !important; border: 1px solid #ffffff !important; border-radius: 8px; width: 100%; font-weight: bold; }
+    .stApp {{ background-color: #131313; color: #e5e2e1; }}
+    .main-title {{
+        color: #F9C03D !important;
+        font-family: 'Space Grotesk', sans-serif !important;
+        font-weight: 900 !important;
+        letter-spacing: -1px !important;
+        text-align: center !important;
+        text-transform: uppercase;
+        font-size: 2.5rem !important;
+        margin-bottom: 0px !important;
+    }}
+    .sub-title {{
+        text-align: center; color: #888; font-family: 'Inter', sans-serif;
+        font-size: 0.8rem; letter-spacing: 2px; margin-bottom: 30px;
+    }}
+    input {{ background-color: #201f1f !important; color: white !important; border: 1px solid #333 !important; border-radius: 8px !important; }}
+    [data-testid="stVerticalBlock"] div.stButton {{ display: flex; justify-content: center !important; width: 100% !important; }}
+    div.stButton > button {{
+        background-color: transparent !important; color: #ffffff !important; border: 1px solid #ffffff !important;
+        border-radius: 8px; padding: 10px 60px !important; font-weight: bold; transition: 0.3s; margin: 0 auto !important; display: block !important;
+    }}
+    div.stButton > button:hover {{ background-color: #ffffff !important; color: #131313 !important; }}
+    .exercise-card {{ background-color: #201f1f; padding: 20px; border-radius: 12px; border-left: 4px solid #F9C03D; margin-bottom: 15px; }}
     </style>
 """, unsafe_allow_html=True)
 
