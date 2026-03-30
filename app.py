@@ -60,15 +60,25 @@ if not st.session_state.logado:
         
         if st.button("ACESSAR"):
             try:
-                usuarios = conn.read(worksheet="usuarios")
+                # Tenta ler os usuários. Se falhar, espera 1 segundo e tenta de novo uma única vez.
+                try:
+                    usuarios = conn.read(worksheet="usuarios")
+                except:
+                    import time
+                    time.sleep(1) # Pequena pausa para estabilizar a conexão
+                    usuarios = conn.read(worksheet="usuarios")
+                
                 usuarios['email'] = usuarios['email'].astype(str).str.strip().str.lower()
                 usuarios['senha'] = usuarios['senha'].astype(str).str.strip()
+                
                 if ((usuarios['email'] == email_input) & (usuarios['senha'] == senha_input)).any():
                     st.session_state.logado = True
                     st.session_state.email = email_input
                     st.rerun()
-                else: st.error("Credenciais inválidas.")
-            except: st.error("Erro de conexão.")  
+                else: 
+                    st.error("Credenciais inválidas.")
+            except Exception as e: 
+                st.error("Instabilidade na rede. Tente clicar novamente em 1 segundo.")
 
 # --- ÁREA LOGADA ---
 else:
