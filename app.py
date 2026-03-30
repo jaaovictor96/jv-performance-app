@@ -146,30 +146,40 @@ else:
                     
                     # ... (resto da lógica de lista_registros permanece igual)
                 
+                # --- ÁREA FINAL DO FORMULÁRIO (NOTAS E ENVIO) ---
                 notas = st.text_area("Notas do Atleta", placeholder="Dificuldade, cansaço, etc.")
-                if st.button("FINALIZAR TREINO"):
-                    if lista_registros:
-                        try:
-                            # 1. Adiciona os novos dados à planilha
-                            df_novo = pd.DataFrame(lista_registros)
-                            # Forçamos a atualização pegando os dados existentes e concatenando
-                            registros_atuais = conn.read(worksheet="registros", ttl=0)
-                            df_final = pd.concat([registros_atuais, df_novo], ignore_index=True)
-                            
-                            conn.update(worksheet="registros", data=df_final)
-                            
-                            # 2. LIMPEZA CRÍTICA DE CACHE
-                            st.cache_data.clear() # Limpa o cache para que a próxima leitura venha do zero
-                            
-                            st.success("✅ Treino salvo com sucesso na planilha!")
-                            st.balloons()
-                            
-                            # 3. RERUN para limpar os campos e atualizar o histórico
-                            st.rerun()
-                            
-                        except Exception as e:
-                            st.error(f"Erro ao salvar: {e}")
+
+                # O BOTÃO PRECISA SER O 'form_submit_button' PARA FUNCIONAR DENTRO DO FORM
+                if st.form_submit_button("FINALIZAR TREINO"):
+                    try:
+                        # 1. Adiciona o comentário/notas em todos os registros do treino atual
+                        for r in lista_registros:
+                            r["comentario"] = notas
+                        
+                        # 2. Lê os registros atuais para fazer o Append (sem cache)
+                        registros_atuais = conn.read(worksheet="registros", ttl=0)
+                        
+                        # 3. Concatena os novos dados
+                        df_novos = pd.DataFrame(lista_registros)
+                        df_final = pd.concat([registros_atuais, df_novos], ignore_index=True)
+                        
+                        # 4. Atualiza a planilha
+                        conn.update(worksheet="registros", data=df_final)
+                        
+                        # 5. Limpa o cache para a próxima leitura vir atualizada
+                        st.cache_data.clear()
+                        
+                        st.success("✅ Treino registrado com sucesso!")
+                        st.balloons()
+                        
+                        # Pequeno delay antes de recarregar para o aluno ver o sucesso
+                        import time
+                        time.sleep(2)
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Erro ao salvar na planilha: {e}")
                     else:
                         st.warning("Preencha ao menos uma carga antes de finalizar.")
-                        
+
     except Exception as e: st.error(f"Erro ao carregar dados: {e}")
