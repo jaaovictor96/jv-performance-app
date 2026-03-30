@@ -16,7 +16,30 @@ conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Space+Grotesk:wght@700;900&display=swap');
-    .stApp {{ background-color: #131313; color: #e5e2e1; }}
+    .stApp {
+        background: linear-gradient(rgba(19, 19, 19, 0.94), rgba(19, 19, 19, 0.94)), 
+                    url('https://drive.google.com/uc?export=view&id=1oIpYQkIp4Y0M0vumaR5Tpa0yVDwSF7mc');
+        
+        background-size: cover;       /* Preenche a tela toda */
+        background-position: center;  /* Centraliza a logo */
+        background-repeat: no-repeat;
+        background-attachment: fixed; /* A logo fica fixa enquanto o treino rola */
+    }
+
+    /* Remove fundos brancos padrão do Streamlit para mostrar a marca d'água */
+    [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+        background-color: transparent !important;
+    }
+
+    /* Seus cards continuam com fundo sólido para leitura perfeita */
+    .exercise-card {
+        background-color: rgba(30, 30, 30, 0.9); /* Quase preto, levemente transparente */
+        padding: 20px;
+        border-radius: 12px;
+        border-left: 4px solid #F9C03D;
+        margin-bottom: 15px;
+    }
+            
     .main-title {{
         color: #F9C03D !important;
         font-family: 'Space Grotesk', sans-serif !important;
