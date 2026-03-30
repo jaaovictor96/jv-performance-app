@@ -149,36 +149,35 @@ else:
                 # --- ÁREA FINAL DO FORMULÁRIO (NOTAS E ENVIO) ---
                 notas = st.text_area("Notas do Atleta", placeholder="Dificuldade, cansaço, etc.")
 
-                if st.form_submit_button("FINALIZAR E ENVIAR"):
+                if st.form_submit_button("FINALIZAR TREINO"):
                     try:
-                        # 1. Prepara os dados atuais
+                        # 1. Monta o DataFrame do envio atual com TODAS as colunas explicitamente
                         df_envio = pd.DataFrame(lista_registros)
                         df_envio["comentario"] = notas
                         
-                        # 2. Tenta ler o que já existe (TTL=0 é obrigatório aqui)
+                        # Garantimos a ordem das colunas para não bagunçar o Sheets
+                        colunas_padrao = ["data", "email_aluno", "treino", "exercicio", "carga", "comentario"]
+                        df_envio = df_envio.reindex(columns=colunas_padrao)
+
+                        # 2. Tenta ler o histórico para anexar (TTL=0)
                         try:
-                            # Forçamos a leitura da aba 'registros'
                             existente = conn.read(worksheet="registros", ttl=0)
-                            
-                            # Se a planilha não estiver vazia, juntamos os dados
                             if existente is not None and not existente.empty:
-                                # Limpa linhas totalmente nulas que o Google Sheets às vezes cria
-                                existente = existente.dropna(how='all')
+                                # Filtra apenas colunas que nos interessam e remove linhas vazias
+                                existente = existente[colunas_padrao].dropna(how='all')
                                 df_final = pd.concat([existente, df_envio], ignore_index=True)
                             else:
                                 df_final = df_envio
                         except:
-                            # Se a aba estiver totalmente limpa (sem cabeçalho), usa só os novos
+                            # Se a aba estiver vazia ou der erro na leitura, inicia com o envio atual
                             df_final = df_envio
 
-                        # 3. COMANDO DE GRAVAÇÃO DIRETA
-                        # Importante: O conn.update sobrescreve a aba com o novo DataFrame
+                        # 3. COMANDO DE ATUALIZAÇÃO (Sobrescreve a aba com a tabela completa)
                         conn.update(worksheet="registros", data=df_final)
                         
-                        # 4. LIMPEZA TOTAL DE CACHE (CRÍTICO)
+                        # 4. LIMPEZA DE CACHE E FEEDBACK
                         st.cache_data.clear()
-                        
-                        st.success("✅ DADOS ENVIADOS PARA A PLANILHA!")
+                        st.success("✅ TREINO REGISTRADO!")
                         st.balloons()
                         
                         import time
@@ -186,7 +185,6 @@ else:
                         st.rerun()
 
                     except Exception as e:
-                        st.error(f"Falha na gravação: {e}")
-                        st.info("Dica: Verifique se o nome da aba é exatamente 'registros' (minúsculo).")
+                        st.error(f"Erro ao gravar: {e}")
 
     except Exception as e: st.error(f"Erro ao carregar dados: {e}")
