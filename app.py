@@ -120,16 +120,22 @@ else:
                         </div>
                     """, unsafe_allow_html=True)
                     
-                    # 2. VÍDEO EMBUTIDO (PLAYER INTERNO)
+                    # --- LÓGICA DO VÍDEO EMBUTIDO COM IFRAME (ROBUSTO) ---
                     video_url = row.get('video_url', '') 
                     if pd.notnull(video_url) and str(video_url).startswith('http'):
-                        # Transformamos o link para o formato que o Streamlit consegue ler internamente
-                        video_id = video_url.split('/d/')[1].split('/')[0]
-                        direct_link = f"https://drive.google.com/uc?export=download&id={video_id}"
+                        # Transformamos o link para o formato de PREVIEW que aceita embutimento
+                        video_embed = video_url.split('?')[0].replace('/view', '/preview').replace('/edit', '/preview')
                         
-                        # Expander para não ocupar espaço se o aluno já souber o exercício
                         with st.expander("🎬 VER EXECUÇÃO"):
-                            st.video(direct_link)
+                            # Usamos HTML para forçar o player dentro do app
+                            st.components.v1.html(
+                                f"""
+                                <iframe src="{video_embed}" width="100%" height="200" 
+                                frameborder="0" style="border-radius: 8px;" 
+                                allow="autoplay"></iframe>
+                                """,
+                                height=210,
+                            )
 
                     # 3. CAMPO DE CARGA
                     carga = st.number_input(f"Carga (kg) - {row['exercicio']}", key=f"kg_{idx}", step=0.5, min_value=0.0, value=carga_anterior)
