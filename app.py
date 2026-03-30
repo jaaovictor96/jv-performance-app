@@ -150,9 +150,9 @@ else:
                             <div class="exercise-card">
                                 <p style="color: #F9C03D; font-size: 10px; font-weight: bold; margin: 0;">{selecao_treino}</p>
                                 <h4 style="margin: 5px 0; color: white; font-family: Space Grotesk; text-transform: uppercase;">{row['exercicio']}</h4>
-                                <p style="color: #888; font-size: 12px; margin: 0;">META: {int(float(row['series'])) if pd.notnull(row['series']) else 0} SÉRIES x {str(row['reps']).replace('.0', '') if pd.notnull(row['reps']) else "0"} REPS</p>
+                                <p style="color: #888; font-size: 12px; margin: 0;">META: {int(float(row['series'])) if pd.notnull(row['series']) else 0} SÉRIES x {str(row['reps']).replace('', '') if pd.notnull(row['reps']) else "0"} REPS</p>
                                 <p style="color: #F9C03D; font-size: 11px; margin-top: 5px; opacity: 0.8;">Última carga: {carga_anterior} kg</p>
-                            </div>
+                            </div>.0
                         """, unsafe_allow_html=True)
                         
                         video_url = row.get('video_url', '') 
@@ -161,7 +161,13 @@ else:
                             with st.expander("🎬 VER EXECUÇÃO"):
                                 st.components.v1.html(f'<iframe src="{video_embed}" width="100%" height="200" frameborder="0"></iframe>', height=210)
 
-                        carga = st.number_input(f"Carga (kg) - {row['exercicio']}", key=f"kg_{idx}", value=carga_anterior)
+                        carga = st.number_input(
+                        f"Carga (kg) - {row['exercicio']}", 
+                        key=f"kg_{idx}", 
+                        step=0.5,         
+                        min_value=0.0,    
+                        value=carga_anterior
+)
                         lista_registros.append({"data": datetime.now().strftime("%d/%m/%Y %H:%M"), "email_aluno": st.session_state.email, "treino": selecao_treino, "exercicio": row['exercicio'], "carga": carga})
 
                     notas = st.text_area("Notas do Atleta")
