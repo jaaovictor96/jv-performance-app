@@ -4,6 +4,19 @@ import pandas as pd
 from datetime import datetime
 import plotly.express as px
 import time
+import base64
+
+# --- FUNÇÃO PARA CARREGAR A LOGO QUE VOCÊ SUBIU ---
+def get_base64_image(image_path):
+    with open(image_path, "rb") as img_file:
+        return base64.b64encode(img_file.read()).decode()
+
+try:
+    img_base64 = get_base64_image("JV Ferreira logo.jpeg")
+    logo_url = f"data:image/jpeg;base64,{img_base64}"
+except:
+    # Caso o arquivo não seja encontrado, ele tenta o link do Drive como backup
+    logo_url = "https://drive.google.com/uc?export=view&id=1oIpYQkIp4Y0M0vumaR5Tpa0yVDwSF7mc"   
 
 # --- 1. CONFIGURAÇÃO E CSS (RESTALREI O ORIGINAL 100%) ---
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
@@ -13,24 +26,24 @@ EMAIL_COACH = "jaaovictor96@gmail.com"
 
 conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 
-st.markdown("""
+st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Space+Grotesk:wght@700;900&display=swap');
     
-    .stApp {
+    .stApp {{
         background: linear-gradient(rgba(19, 19, 19, 0.94), rgba(19, 19, 19, 0.94)), 
-                    url('https://drive.google.com/uc?export=view&id=1oIpYQkIp4Y0M0vumaR5Tpa0yVDwSF7mc');
-        background-size: cover !important;
+                    url('{logo_url}');
+        background-size: contain !important;
         background-position: center !important;
         background-repeat: no-repeat !important;
         background-attachment: fixed !important;
-    }
+    }}
 
-    [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+    [data-testid="stAppViewContainer"], [data-testid="stHeader"] {{
         background-color: transparent !important;
-    }
+    }}
 
-    .main-title {
+    .main-title {{
         color: #F9C03D !important;
         font-family: 'Space Grotesk', sans-serif !important;
         font-weight: 900 !important;
@@ -40,28 +53,28 @@ st.markdown("""
         text-transform: uppercase;
         font-size: 2.5rem !important;
         margin-bottom: 0px !important;
-    }
+    }}
 
-    .sub-title {
+    .sub-title {{
         text-align: center; 
         color: #888; 
         font-family: 'Inter', sans-serif;
         font-size: 0.8rem; 
         letter-spacing: 2px; 
         margin-bottom: 30px;
-    }
+    }}
 
-    .exercise-card {
+    .exercise-card {{
         background-color: rgba(32, 31, 31, 0.9) !important;
         padding: 20px;
         border-radius: 12px;
         border-left: 4px solid #F9C03D;
         margin-bottom: 15px;
-    }
+    }}
 
-    input { background-color: #201f1f !important; color: white !important; border: 1px solid #333 !important; border-radius: 8px !important; }
+    input {{ background-color: #201f1f !important; color: white !important; border: 1px solid #333 !important; border-radius: 8px !important; }}
     
-    div.stButton > button {
+    div.stButton > button {{
         background-color: transparent !important; 
         color: #ffffff !important; 
         border: 1px solid #ffffff !important;
@@ -70,7 +83,7 @@ st.markdown("""
         font-weight: bold; 
         display: block !important; 
         margin: 0 auto !important;
-    }
+    }}
     </style>
 """, unsafe_allow_html=True)
 
