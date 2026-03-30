@@ -46,7 +46,6 @@ st.markdown(f"""
         border-radius: 8px !important;
     }}
 
-    /* BOTÃO DE LOGIN: BRANCO E VAZADO */
     [data-testid="stVerticalBlock"] div.stButton {{
         display: flex;
         justify-content: center !important;
@@ -68,7 +67,6 @@ st.markdown(f"""
         color: #131313 !important;
     }}
 
-    /* CARDS DE EXERCÍCIO */
     .exercise-card {{
         background-color: #201f1f;
         padding: 20px;
@@ -90,13 +88,13 @@ if not st.session_state.logado:
     
     col1, col2, col3 = st.columns([1, 4, 1])
     with col2:
-        email_input = st.text_input("📧 E-mail do Atleta", placeholder="atleta@exemplo.com")
-        senha_input = st.text_input("🔒 Senha", type="password", placeholder="••••••")
+        email_input = st.text_input("📧 E-mail do Atleta", placeholder="atleta@exemplo.com").strip().lower()
+        senha_input = st.text_input("🔒 Senha", type="password", placeholder="••••••").strip()
         
         if st.button("ACESSAR"):
             try:
                 usuarios = conn.read(worksheet="usuarios")
-                usuarios['email'] = usuarios['email'].astype(str).str.strip()
+                usuarios['email'] = usuarios['email'].astype(str).str.strip().str.lower()
                 usuarios['senha'] = usuarios['senha'].astype(str).str.strip()
                 
                 if ((usuarios['email'] == email_input) & (usuarios['senha'] == senha_input)).any():
@@ -118,14 +116,22 @@ else:
 
     st.markdown("""
         <h2 style='font-family: Space Grotesk; font-size: 2.5rem; font-weight: 900; line-height: 1;'>
-        DAILY <br><span style='color: #F9C03D;'>PROTOCOL</span>
+        PROTOCOLO <br><span style='color: #F9C03D;'>DIÁRIO</span>
         </h2>
     """, unsafe_allow_html=True)
 
     try:
+        # Carregando treinos e histórico de uma vez para performance
         df_treinos = conn.read(worksheet="planilha_treinos")
-        df_treinos['email_aluno'] = df_treinos['email_aluno'].astype(str).str.strip()
+        df_treinos['email_aluno'] = df_treinos['email_aluno'].astype(str).str.strip().str.lower()
         meus_treinos = df_treinos[df_treinos['email_aluno'] == st.session_state.email]
+
+        # Buscando o histórico de registros para carregar as últimas cargas
+        try:
+            historico_geral = conn.read(worksheet="registros")
+            historico_geral['email_aluno'] = historico_geral['email_aluno'].astype(str).str.strip().str.lower()
+        except:
+            historico_geral = pd.DataFrame()
 
         if meus_treinos.empty:
             st.info("Nenhum protocolo ativo.")
@@ -138,9 +144,19 @@ else:
                 lista_registros = []
                 
                 for idx, row in exercicios.iterrows():
-                    # --- LIMPEZA DE DECIMAIS PARA INTEIROS ---
+                    # --- LÓGICA DE BUSCA DA ÚLTIMA CARGA ---
+                    carga_anterior = 0.0
+                    if not historico_geral.empty:
+                        # Filtra pelo aluno e pelo nome exato do exercício
+                        filtro_hist = historico_geral[
+                            (historico_geral['email_aluno'] == st.session_state.email) & 
+                            (historico_geral['exercicio'] == row['exercicio'])
+                        ]
+                        if not filtro_hist.empty:
+                            # Pega o último valor da coluna carga (assumindo que novos registros entram no fim)
+                            carga_anterior = float(filtro_hist.iloc[-1]['carga'])
+
                     series_int = int(float(row['series'])) if pd.notnull(row['series']) else 0
-                    # Para as reps, removemos o .0 se existir, mas mantemos o texto se for intervalo (ex: 10-12)
                     reps_clean = str(row['reps']).replace('.0', '') if pd.notnull(row['reps']) else "0"
 
                     st.markdown(f"""
@@ -148,10 +164,12 @@ else:
                             <p style="color: #F9C03D; font-size: 10px; font-weight: bold; margin: 0;">{selecao_treino}</p>
                             <h4 style="margin: 5px 0; color: white; font-family: Space Grotesk; text-transform: uppercase;">{row['exercicio']}</h4>
                             <p style="color: #888; font-size: 12px; margin: 0;">META: {series_int} SÉRIES x {reps_clean} REPS</p>
+                            <p style="color: #F9C03D; font-size: 11px; margin-top: 5px; opacity: 0.8;">Última carga: {carga_anterior} kg</p>
                         </div>
                     """, unsafe_allow_html=True)
                     
-                    carga = st.number_input(f"Carga (kg) - {row['exercicio']}", key=f"kg_{idx}", step=0.5, min_value=0.0)
+                    # O campo number_input já inicia com a carga anterior (value=carga_anterior)
+                    carga = st.number_input(f"Carga (kg) - {row['exercicio']}", key=f"kg_{idx}", step=0.5, min_value=0.0, value=carga_anterior)
                     
                     lista_registros.append({
                         "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
@@ -162,13 +180,18 @@ else:
                     })
                 
                 notas = st.text_area("Notas do Atleta", placeholder="Dificuldade, cansaço, etc.")
+                
                 if st.form_submit_button("FINALIZAR E ENVIAR"):
+                    # Recarrega registros no momento do envio para evitar sobrescrita (Append Real)
+                    registros_atuais = conn.read(worksheet="registros")
                     for r in lista_registros: r["comentario"] = notas
                     
-                    registros_atuais = conn.read(worksheet="registros")
-                    df_final = pd.concat([registros_atuais, pd.DataFrame(lista_registros)], ignore_index=True)
+                    df_novos = pd.DataFrame(lista_registros)
+                    df_final = pd.concat([registros_atuais, df_novos], ignore_index=True)
+                    
                     conn.update(worksheet="registros", data=df_final)
                     st.success("Dados enviados com sucesso!")
+                    st.rerun()
 
     except Exception as e:
         st.error(f"Erro ao carregar dados: {e}")
