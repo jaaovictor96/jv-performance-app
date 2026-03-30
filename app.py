@@ -149,42 +149,44 @@ else:
                 # --- ÁREA FINAL DO FORMULÁRIO (NOTAS E ENVIO) ---
                 notas = st.text_area("Notas do Atleta", placeholder="Dificuldade, cansaço, etc.")
 
-                if st.form_submit_button("FINALIZAR TREINO"):
+                if st.form_submit_button("FINALIZAR E ENVIAR"):
                     try:
-                        # 1. Criar o DataFrame com os dados atuais da lista
-                        df_para_enviar = pd.DataFrame(lista_registros)
+                        # 1. Prepara os dados atuais
+                        df_envio = pd.DataFrame(lista_registros)
+                        df_envio["comentario"] = notas
                         
-                        # Adiciona a nota em todas as linhas do envio atual
-                        df_para_enviar["comentario"] = notas
-
-                        # 2. Tentar ler os registros existentes (sem cache) para concatenar
+                        # 2. Tenta ler o que já existe (TTL=0 é obrigatório aqui)
                         try:
-                            registros_existentes = conn.read(worksheet="registros", ttl=0)
-                            # Remove linhas totalmente vazias que o Sheets às vezes gera
-                            registros_existentes = registros_existentes.dropna(how='all')
-                            df_final = pd.concat([registros_existentes, df_para_enviar], ignore_index=True)
+                            # Forçamos a leitura da aba 'registros'
+                            existente = conn.read(worksheet="registros", ttl=0)
+                            
+                            # Se a planilha não estiver vazia, juntamos os dados
+                            if existente is not None and not existente.empty:
+                                # Limpa linhas totalmente nulas que o Google Sheets às vezes cria
+                                existente = existente.dropna(how='all')
+                                df_final = pd.concat([existente, df_envio], ignore_index=True)
+                            else:
+                                df_final = df_envio
                         except:
-                            # Se a aba estiver vazia ou der erro na leitura, envia apenas os novos
-                            df_final = df_para_enviar
+                            # Se a aba estiver totalmente limpa (sem cabeçalho), usa só os novos
+                            df_final = df_envio
 
-                        # 3. EXECUTAR A ATUALIZAÇÃO
-                        # Forçamos o Streamlit a "esquecer" os dados antigos antes de gravar
-                        st.cache_data.clear()
-                        
-                        # O comando de atualização propriamente dito
+                        # 3. COMANDO DE GRAVAÇÃO DIRETA
+                        # Importante: O conn.update sobrescreve a aba com o novo DataFrame
                         conn.update(worksheet="registros", data=df_final)
                         
-                        # 4. FEEDBACK E RESET
-                        st.success("✅ REGISTRO ENVIADO!")
+                        # 4. LIMPEZA TOTAL DE CACHE (CRÍTICO)
+                        st.cache_data.clear()
+                        
+                        st.success("✅ DADOS ENVIADOS PARA A PLANILHA!")
                         st.balloons()
                         
-                        # Espera 2 segundos para o Google processar a escrita
                         import time
                         time.sleep(2)
                         st.rerun()
 
                     except Exception as e:
-                        st.error(f"ERRO DE CONEXÃO: {e}")
-                        st.info("Verifique se a aba 'registros' existe e se as colunas estão corretas.")
+                        st.error(f"Falha na gravação: {e}")
+                        st.info("Dica: Verifique se o nome da aba é exatamente 'registros' (minúsculo).")
 
     except Exception as e: st.error(f"Erro ao carregar dados: {e}")
