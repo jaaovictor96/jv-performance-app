@@ -135,21 +135,25 @@ else:
         # ==========================
         st.markdown("<h2 style='font-family: Space Grotesk; color: #F9C03D;'>ANÁLISE DE PERFORMANCE</h2>", unsafe_allow_html=True)
         
-        # 1. Lemos a aba de usuários para ter a lista COMPLETA de alunos
+        # 1. Lemos as abas necessárias
         df_usuarios = conn.read(worksheet="usuarios", ttl=0)
-        # 2. Lemos a aba de registros para ver os treinos realizados
         df_coach = conn.read(worksheet="registros", ttl=0)
         
         if not df_usuarios.empty:
-            # Puxamos todos os e-mails da aba usuarios (menos o seu, se quiser filtrar)
-            lista_todos_alunos = df_usuarios['nome'].astype(str).str.strip().str.lower().unique()
+            # Criamos uma lista de nomes para o selectbox
+            # (Removemos valores nulos e garantimos que sejam strings)
+            lista_nomes = df_usuarios['nome'].dropna().unique().tolist()
             
-            aluno_sel = st.selectbox("Selecione o Aluno:", lista_todos_alunos)
+            nome_sel = st.selectbox("Selecione o Aluno:", lista_nomes)
             
-            # Verificamos se esse aluno selecionado já tem treinos registrados
+            # 2. Descobrimos o e-mail vinculado ao nome selecionado
+            email_vinculado = df_usuarios[df_usuarios['nome'] == nome_sel]['email'].iloc[0].strip().lower()
+            
             if not df_coach.empty:
                 df_coach['email_aluno'] = df_coach['email_aluno'].astype(str).str.strip().str.lower()
-                df_aluno = df_coach[df_coach['email_aluno'] == aluno_sel].copy()
+                
+                # Filtramos os registros pelo e-mail que acabamos de encontrar
+                df_aluno = df_coach[df_coach['email_aluno'] == email_vinculado].copy()
                 
                 if not df_aluno.empty:
                     df_aluno['data'] = pd.to_datetime(df_aluno['data'], dayfirst=True)
@@ -162,11 +166,11 @@ else:
                     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.info(f"O aluno {aluno_sel} ainda não registrou nenhum treino.")
+                    st.info(f"O(A) atleta {nome_sel} ainda não registrou nenhum treino.")
             else:
                 st.warning("A base de registros está vazia.")
         else:
-            st.error("Nenhum usuário cadastrado na aba 'usuarios'.")
+            st.error("Nenhum usuário encontrado na aba 'usuarios'.")
 
     else:
         # ==========================
