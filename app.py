@@ -97,6 +97,8 @@ else:
             with st.form("registro_cargas"):
                 lista_registros = []
                 
+# --- DENTRO DO LOOP DE EXERCÍCIOS (for idx, row in exercicios.iterrows():) ---
+
                 for idx, row in exercicios.iterrows():
                     # Lógica da última carga
                     carga_anterior = 0.0
@@ -108,37 +110,31 @@ else:
                     series_int = int(float(row['series'])) if pd.notnull(row['series']) else 0
                     reps_clean = str(row['reps']).replace('.0', '') if pd.notnull(row['reps']) else "0"
 
-                    # --- LÓGICA DO VÍDEO (MODO PLAYER LIMPO) ---
-                    video_url = row.get('video_url', '') 
-                    if pd.notnull(video_url) and str(video_url).startswith('http'):
-                        # Tratamento do link: removemos o final /view e forçamos o /preview
-                        # Isso faz o Google Drive abrir apenas o player de vídeo preto
-                        video_clean = video_url.split('?')[0].replace('/view', '/preview').replace('/edit', '/preview')
-                        
-                        nome_exercicio_display = f'<a href="{video_clean}" target="_blank" style="color: white; text-decoration: none; border-bottom: 1px dashed #F9C03D;">{row["exercicio"]} 🎬</a>'
-                    else:
-                        nome_exercicio_display = row['exercicio']
-
+                    # 1. CARD DO EXERCÍCIO (Visual Elite)
                     st.markdown(f"""
                         <div class="exercise-card">
                             <p style="color: #F9C03D; font-size: 10px; font-weight: bold; margin: 0;">{selecao_treino}</p>
-                            <h4 style="margin: 5px 0; color: white; font-family: Space Grotesk; text-transform: uppercase;">{nome_exercicio_display}</h4>
+                            <h4 style="margin: 5px 0; color: white; font-family: Space Grotesk; text-transform: uppercase;">{row['exercicio']}</h4>
                             <p style="color: #888; font-size: 12px; margin: 0;">META: {series_int} SÉRIES x {reps_clean} REPS</p>
                             <p style="color: #F9C03D; font-size: 11px; margin-top: 5px; opacity: 0.8;">Última carga: {carga_anterior} kg</p>
                         </div>
                     """, unsafe_allow_html=True)
                     
+                    # 2. VÍDEO EMBUTIDO (PLAYER INTERNO)
+                    video_url = row.get('video_url', '') 
+                    if pd.notnull(video_url) and str(video_url).startswith('http'):
+                        # Transformamos o link para o formato que o Streamlit consegue ler internamente
+                        video_id = video_url.split('/d/')[1].split('/')[0]
+                        direct_link = f"https://drive.google.com/uc?export=download&id={video_id}"
+                        
+                        # Expander para não ocupar espaço se o aluno já souber o exercício
+                        with st.expander("🎬 VER EXECUÇÃO"):
+                            st.video(direct_link)
+
+                    # 3. CAMPO DE CARGA
                     carga = st.number_input(f"Carga (kg) - {row['exercicio']}", key=f"kg_{idx}", step=0.5, min_value=0.0, value=carga_anterior)
                     
-                    lista_registros.append({
-                        "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                        "email_aluno": st.session_state.email,
-                        "treino": selecao_treino,
-                        "exercicio": row['exercicio'],
-                        "carga": carga
-                    })
-                
-                # ... (Restante do formulário permanece igual)
+                    # ... (resto da lógica de lista_registros permanece igual)
                 
                 notas = st.text_area("Notas do Atleta", placeholder="Dificuldade, cansaço, etc.")
                 if st.form_submit_button("FINALIZAR E ENVIAR"):
