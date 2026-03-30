@@ -142,7 +142,7 @@ else:
         
         if not df_usuarios.empty:
             # Puxamos todos os e-mails da aba usuarios (menos o seu, se quiser filtrar)
-            lista_todos_alunos = df_usuarios['email'].astype(str).str.strip().str.lower().unique()
+            lista_todos_alunos = df_usuarios['nome'].astype(str).str.strip().str.lower().unique()
             
             aluno_sel = st.selectbox("Selecione o Aluno:", lista_todos_alunos)
             
