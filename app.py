@@ -147,12 +147,29 @@ else:
                     # ... (resto da lógica de lista_registros permanece igual)
                 
                 notas = st.text_area("Notas do Atleta", placeholder="Dificuldade, cansaço, etc.")
-                if st.form_submit_button("FINALIZAR E ENVIAR"):
-                    registros_atuais = conn.read(worksheet="registros")
-                    for r in lista_registros: r["comentario"] = notas
-                    df_final = pd.concat([registros_atuais, pd.DataFrame(lista_registros)], ignore_index=True)
-                    conn.update(worksheet="registros", data=df_final)
-                    st.success("Dados enviados com sucesso!")
-                    st.rerun()
-
+                if st.button("FINALIZAR TREINO"):
+                    if lista_registros:
+                        try:
+                            # 1. Adiciona os novos dados à planilha
+                            df_novo = pd.DataFrame(lista_registros)
+                            # Forçamos a atualização pegando os dados existentes e concatenando
+                            registros_atuais = conn.read(worksheet="registros", ttl=0)
+                            df_final = pd.concat([registros_atuais, df_novo], ignore_index=True)
+                            
+                            conn.update(worksheet="registros", data=df_final)
+                            
+                            # 2. LIMPEZA CRÍTICA DE CACHE
+                            st.cache_data.clear() # Limpa o cache para que a próxima leitura venha do zero
+                            
+                            st.success("✅ Treino salvo com sucesso na planilha!")
+                            st.balloons()
+                            
+                            # 3. RERUN para limpar os campos e atualizar o histórico
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"Erro ao salvar: {e}")
+                    else:
+                        st.warning("Preencha ao menos uma carga antes de finalizar.")
+                        
     except Exception as e: st.error(f"Erro ao carregar dados: {e}")
