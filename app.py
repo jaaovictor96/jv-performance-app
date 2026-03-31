@@ -6,6 +6,8 @@ import plotly.express as px
 import time
 import base64
 
+st.set_option('client.displayEnabled', True)
+
 # --- FUNÇÃO PARA CARREGAR A LOGO QUE VOCÊ SUBIU ---
 def get_base64_image(image_path):
     with open(image_path, "rb") as img_file:
