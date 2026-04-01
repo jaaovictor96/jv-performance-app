@@ -270,7 +270,7 @@ else:
 
                                                 # 2. Cria o gráfico (seu código original)
                         fig = px.line(df_prog, x='data', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
-
+                        df_prog['data'] = pd.to_datetime(df_prog['data']).dt.strftime('%d/%m/%Y')
                         # 3. Personalização Visual (seu código original)
                         fig.update_traces(line_color='#F9C03D')
                         fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
@@ -278,7 +278,7 @@ else:
                         # --- O AJUSTE DE OURO PARA O EIXO X ESTÁ AQUI ---
                         fig.update_xaxes(
                             type='category',      # Trata cada data como uma categoria (evita buracos no gráfico)
-                            tickformat='%d/%m',   # Mostra apenas Dia/Mês (ou '%d/%m/%y' para incluir o ano)
+                            tickformat='%d/%m/%y',   # Mostra apenas Dia/Mês/Ano
                             dtick=1               # Garante que mostre todas as datas se houver poucas
                         )
                     else:
