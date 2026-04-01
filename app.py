@@ -208,6 +208,8 @@ else:
                     fig = px.line(df_prog, x='data', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
                     fig.update_traces(line_color='#F9C03D')
                     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
+                    fig.update_xaxes(title_text='Data', tickformat='%d/%m/%Y')
+                    fig.update_yaxes(title_text='Carga (kg)')   
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.info(f"O(A) atleta {nome_sel} ainda não registrou nenhum treino.")
