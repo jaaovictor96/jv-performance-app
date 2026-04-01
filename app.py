@@ -227,15 +227,23 @@ else:
                 df_aluno = df_coach[df_coach['email_aluno'] == email_vinculado].copy()
                 
                 if not df_aluno.empty:
+                    # 1. Garantimos que é datetime e ordenamos
                     df_aluno['data'] = pd.to_datetime(df_aluno['data'], dayfirst=True)
                     exercicio_sel = st.selectbox("Exercício:", df_aluno['exercicio'].unique())
                     df_prog = df_aluno[df_aluno['exercicio'] == exercicio_sel].sort_values('data')
-                    df_prog['data_str'] = df_prog['data'].dt.strftime('%d/%m/%Y')
+                    
+                    # 2. Criamos uma coluna de texto formatada para o Eixo X
+                    df_prog['data_display'] = df_prog['data'].dt.strftime('%d/%m/%Y')
 
-                    fig = px.line(df_prog, x='data_str', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
+                    # 3. Criamos o gráfico usando a coluna de TEXTO no X
+                    fig = px.line(df_prog, x='data_display', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
+                    
                     fig.update_traces(line_color='#F9C03D')
                     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
-                    fig.update_xaxes(type='category', title="Data")  
+                    
+                    # 4. Forçamos o tipo CATEGORY para não criar espaços vazios nem mostrar horas
+                    fig.update_xaxes(type='category', title="Data do Treino")  
+                    
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.info(f"O(A) atleta {nome_sel} ainda não registrou nenhum treino.")
