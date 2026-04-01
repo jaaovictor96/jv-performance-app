@@ -253,6 +253,59 @@ else:
         else:
             st.error("Nenhum usuário encontrado na aba 'usuarios'.")
 
+    st.markdown("## 📋 Gestão de Check-ins")
+
+    try:
+        # 1. Lê os dados da aba de check-ins
+        df_checkins = conn.read(worksheet="checkins", ttl=0)
+
+        if not df_checkins.empty:
+            # Converter a coluna data para o formato correto e ordenar (mais recentes primeiro)
+            df_checkins['data'] = pd.to_datetime(df_checkins['data'], dayfirst=True)
+            df_checkins = df_checkins.sort_values(by='data', ascending=False)
+
+            # 2. Filtro por Aluno (Opcional, para facilitar sua vida)
+            lista_alunos = df_checkins['email'].unique().tolist()
+            aluno_sel = st.selectbox("Filtrar por Aluno:", ["Todos"] + lista_alunos)
+
+            if aluno_sel != "Todos":
+                df_filtrado = df_checkins[df_checkins['email'] == aluno_sel]
+            else:
+                df_filtrado = df_checkins
+
+            # 3. Exibição dos Dados
+            st.dataframe(
+                df_filtrado, 
+                column_config={
+                    "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                    "email": "Aluno",
+                    "peso": st.column_config.NumberColumn("Peso (kg)", format="%.1f"),
+                    "feedback": "Relato do Aluno"
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+
+            # 4. Gráfico de Peso do Aluno Selecionado
+            if aluno_sel != "Todos":
+                st.markdown(f"### Evolução de Peso: {aluno_sel}")
+                fig_peso = px.line(
+                    df_filtrado, 
+                    x='data', 
+                    y='peso', 
+                    markers=True,
+                    title="Variação de Peso Quinzenal"
+                )
+                fig_peso.update_traces(line_color='#F9C03D')
+                fig_peso.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
+                st.plotly_chart(fig_peso, use_container_width=True)
+
+        else:
+            st.info("Ainda não há check-ins registrados pelos alunos.")
+
+    except Exception as e:
+        st.error(f"Erro ao carregar check-ins: {e}")
+
     else:
         # ==========================
         # TELA: PROTOCOLO DIÁRIO (ORIGINAL)
