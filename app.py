@@ -268,7 +268,7 @@ else:
                             use_container_width=True
                         )
 
-                                                # 2. Cria o gráfico (seu código original)
+                        # 2. Cria o gráfico (seu código original)
                         fig = px.line(df_prog, x='data', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
                         df_prog['data'] = pd.to_datetime(df_prog['data']).dt.strftime('%d/%m/%Y')
                         # 3. Personalização Visual (seu código original)
@@ -281,6 +281,7 @@ else:
                             tickformat='%d/%m/%y',   # Mostra apenas Dia/Mês/Ano
                             dtick=1               # Garante que mostre todas as datas se houver poucas
                         )
+                        st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.info(f"Nenhum check-in quinzenal encontrado para {nome_sel}.")
                 else:
