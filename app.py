@@ -204,7 +204,8 @@ else:
                     
                     exercicio_sel = st.selectbox("Exercício:", df_aluno['exercicio'].unique())
                     df_prog = df_aluno[df_aluno['exercicio'] == exercicio_sel].sort_values('data')
-                    
+                    df_prog['data'] = df_prog['data'].dt.strftime('%d/%m/%Y')
+
                     fig = px.line(df_prog, x='data', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
                     fig.update_traces(line_color='#F9C03D')
                     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
