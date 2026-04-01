@@ -268,20 +268,12 @@ else:
                             use_container_width=True
                         )
 
-                        # 2. Cria o gráfico (seu código original)
-                        fig = px.line(df_prog, x='data', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
-                        df_prog['data'] = pd.to_datetime(df_prog['data']).dt.strftime('%d/%m/%Y')
-                        # 3. Personalização Visual (seu código original)
-                        fig.update_traces(line_color='#F9C03D')
-                        fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
+                        # Gráfico de evolução de peso do aluno
+                        fig_peso = px.line(df_filtrado.sort_values('data'), x='data', y='peso', markers=True, title=f"Evolução de Peso - {nome_sel}")
+                        fig_peso.update_traces(line_color='#F9C03D')
+                        fig_peso.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
 
-                        # --- O AJUSTE DE OURO PARA O EIXO X ESTÁ AQUI ---
-                        fig.update_xaxes(
-                            type='category',      # Trata cada data como uma categoria (evita buracos no gráfico)
-                            tickformat='%d/%m/%y',   # Mostra apenas Dia/Mês/Ano
-                            dtick=1               # Garante que mostre todas as datas se houver poucas
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig_peso, use_container_width=True)
                     else:
                         st.info(f"Nenhum check-in quinzenal encontrado para {nome_sel}.")
                 else:
