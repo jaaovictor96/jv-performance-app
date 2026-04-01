@@ -251,46 +251,56 @@ else:
             st.divider()
 
             # --- PARTE 2: GESTÃO DE CHECK-INS (FILTRADO PELO MESMO ALUNO) ---
-            st.markdown("### 📋 Histórico de Check-ins")
-            try:
-                df_checkins = conn.read(worksheet="checkins", ttl=0)
-                if not df_checkins.empty:
-                    # Padroniza email e data
-                    df_checkins['email'] = df_checkins['email'].astype(str).str.strip().str.lower()
-                    df_checkins['data'] = pd.to_datetime(df_checkins['data'], dayfirst=True)
+        st.markdown("### 📋 Histórico de Check-ins")
+        try:
+            df_checkins = conn.read(worksheet="checkins", ttl=0)
+            if not df_checkins.empty:
+                # Padroniza email e data
+                df_checkins['email'] = df_checkins['email'].astype(str).str.strip().str.lower()
+                df_checkins['data'] = pd.to_datetime(df_checkins['data'], dayfirst=True)
+                
+                # Filtra os check-ins usando o email_vinculado
+                df_filtrado = df_checkins[df_checkins['email'] == email_vinculado].sort_values(by='data', ascending=True)
+
+                if not df_filtrado.empty:
+                    # Tabela de relatos
+                    st.dataframe(
+                        df_filtrado.sort_values(by='data', ascending=False), # Mostra os novos primeiro na tabela
+                        column_config={
+                            "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                            "email": None, 
+                            "peso": st.column_config.NumberColumn("Peso (kg)", format="%.1f"),
+                            "feedback": "Relato do Aluno"
+                        },
+                        hide_index=True,
+                        use_container_width=True
+                    )
+
+                    # --- AJUSTE DO GRÁFICO DE PESO ---
+                    # Criamos a coluna de texto para o eixo X não inventar horários
+                    df_filtrado['data_display'] = df_filtrado['data'].dt.strftime('%d/%m/%Y')
+
+                    fig_peso = px.line(
+                        df_filtrado, 
+                        x='data_display', # Usamos a coluna de texto formatada
+                        y='peso', 
+                        markers=True, 
+                        title=f"Evolução de Peso - {nome_sel}"
+                    )
                     
-                    # Filtra os check-ins usando o email_vinculado lá de cima
-                    df_filtrado = df_checkins[df_checkins['email'] == email_vinculado].sort_values(by='data', ascending=False)
-
-                    if not df_filtrado.empty:
-                        # Tabela de relatos
-                        st.dataframe(
-                            df_filtrado, 
-                            column_config={
-                                "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                                "email": None, # Esconde a coluna de email já que é do mesmo aluno
-                                "peso": st.column_config.NumberColumn("Peso (kg)", format="%.1f"),
-                                "feedback": "Relato do Aluno"
-                            },
-                            hide_index=True,
-                            use_container_width=True
-                        )
-
-                        # Gráfico de evolução de peso do aluno
-                        fig_peso = px.line(df_filtrado.sort_values('data'), x='data', y='peso', markers=True, title=f"Evolução de Peso - {nome_sel}")
-                        fig_peso.update_traces(line_color='#F9C03D')
-                        fig_peso.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
-
-                        st.plotly_chart(fig_peso, use_container_width=True)
-                    else:
-                        st.info(f"Nenhum check-in quinzenal encontrado para {nome_sel}.")
+                    fig_peso.update_traces(line_color='#F9C03D')
+                    fig_peso.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
+                    
+                    # Forçamos o eixo X a ser categoria (limpo e sem buracos)
+                    fig_peso.update_xaxes(type='category', title="Data do Check-in")
+                    
+                    st.plotly_chart(fig_peso, use_container_width=True)
                 else:
-                    st.info("A aba de check-ins está vazia.")
-            except Exception as e:
-                st.error(f"Erro ao carregar check-ins: {e}")
-
-        else:
-            st.error("Nenhum usuário encontrado na aba 'usuarios'.")
+                    st.info(f"Nenhum check-in quinzenal encontrado para {nome_sel}.")
+            else:
+                st.info("A aba de check-ins está vazia.")
+        except Exception as e:
+            st.error(f"Erro ao carregar check-ins: {e}")
 
     else:
         # ==========================
