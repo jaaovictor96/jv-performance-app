@@ -279,7 +279,7 @@ else:
 )
                         lista_registros.append({"data": datetime.now().strftime("%d/%m/%Y %H:%M"), "email_aluno": st.session_state.email, "treino": selecao_treino, "exercicio": row['exercicio'], "carga": carga})
 
-                    notas = st.text_area("Notas do Atleta")
+                    notas = st.text_area("Feedback do Atleta")
                     if st.form_submit_button("FINALIZAR TREINO"):
                         df_envio = pd.DataFrame(lista_registros)
                         df_envio["comentario"] = notas
@@ -287,7 +287,7 @@ else:
                         df_final = pd.concat([existente, df_envio], ignore_index=True)
                         conn.update(worksheet="registros", data=df_final)
                         st.cache_data.clear()
-                        st.success("✅ SALVO!")
+                        st.success("✅ TREINO FINALIZADO!")
                         time.sleep(1)
                         st.rerun()
         except Exception as e: st.error(f"Erro: {e}")
