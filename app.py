@@ -164,6 +164,32 @@ else:
                 st.sidebar.warning("A senha deve ter pelo menos 4 caracteres.")
             else:
                 st.sidebar.error("As senhas não coincidem.")
+    # --- Dentro da sua Sidebar ---
+with st.sidebar:
+    st.divider()
+    st.markdown("### 📝 Check-in Quinzenal")
+    
+    with st.expander("Enviar Relatório de Evolução"):
+        with st.form("form_checkin", clear_on_submit=True):
+            peso_atual = st.number_input("Peso Atual (kg):", min_value=30.0, max_value=200.0, step=0.1)
+            feedback_aluno = st.text_area("Como foi a quinzena? (Fome, Sono, Energia)")
+            
+            botao_checkin = st.form_submit_button("Enviar para o Coach")
+            
+            if botao_checkin:
+                # Criar nova linha de dados
+                novo_checkin = pd.DataFrame([{
+                    "data": datetime.now().strftime("%d/%m/%Y"),
+                    "email": st.session_state.email_usuario,
+                    "peso": peso_atual,
+                    "feedback": feedback_aluno
+                }])
+                
+                # Salvar na planilha 'checkins'
+                conn.create(worksheet="checkins", data=novo_checkin)
+                st.success("Check-in enviado com sucesso! Foco na meta! 🚀")
+
+    st.info("💡 Lembrete: O check-in é quinzenal. O próximo é em 15 dias!")
 
     # Lógica de troca de tela para o Coach
     ativar_dashboard = False
