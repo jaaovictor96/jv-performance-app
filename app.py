@@ -176,19 +176,29 @@ else:
             
             if enviar_checkin:
                 try:
-                    # Cria o DataFrame com os dados do check-in
+                    # 1. Lê os check-ins existentes (se houver)
+                    try:
+                        df_existente = conn.read(worksheet="checkins", ttl=0)
+                    except:
+                        df_existente = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
+
+                    # 2. Cria o novo registro
                     novo_registro = pd.DataFrame([{
                         "data": datetime.now().strftime("%d/%m/%Y"),
-                        "email": st.session_state.email, # usando a mesma chave que você usou na senha
+                        "email": st.session_state.email,
                         "peso": peso_atual,
                         "feedback": feedback
                     }])
+
+                    # 3. Junta o novo com o que já existia
+                    df_atualizado = pd.concat([df_existente, novo_registro], ignore_index=True)
+
+                    # 4. Sobe a planilha inteira atualizada
+                    conn.update(worksheet="checkins", data=df_atualizado)
                     
-                    # Salva na nova aba da planilha
-                    conn.create(worksheet="checkins", data=novo_registro)
                     st.sidebar.success("Check-in enviado! Pra cima! 🚀")
                 except Exception as e:
-                    st.sidebar.error("Erro ao enviar. Verifique a aba 'checkins'.")
+                    st.sidebar.error(f"Erro ao enviar o check-in: {e}") # Isso vai nos mostrar o erro real agora
     
     # Lógica de troca de tela para o Coach
     ativar_dashboard = False
