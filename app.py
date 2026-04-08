@@ -7,6 +7,9 @@ import time
 import base64
 import extra_streamlit_components as stx
 
+# --- 1. CONFIGURAÇÃO E CSS (RESTALREI O ORIGINAL 100%) ---
+st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
+
 # Inicializa o gerenciador de cookies
 cookie_manager = stx.CookieManager()
 
@@ -29,9 +32,6 @@ try:
 except:
     # Caso o arquivo não seja encontrado, ele tenta o link do Drive como backup
     logo_url = "https://drive.google.com/uc?export=view&id=1oIpYQkIp4Y0M0vumaR5Tpa0yVDwSF7mc"   
-
-# --- 1. CONFIGURAÇÃO E CSS (RESTALREI O ORIGINAL 100%) ---
-st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
 
 URL_PLANILHA = "SUA_URL_AQUI"
 EMAIL_COACH = "jaaovictor96@gmail.com"
