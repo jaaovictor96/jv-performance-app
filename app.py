@@ -5,6 +5,18 @@ from datetime import datetime
 import plotly.express as px
 import time
 import base64
+import extra_streamlit_components as stx
+
+# Inicializa o gerenciador de cookies
+cookie_manager = stx.CookieManager()
+
+# 1. Tenta recuperar o cookie de login se o session_state estiver vazio
+if 'logado' not in st.session_state or not st.session_state.logado:
+    cookie_aluno = cookie_manager.get(cookie="jv_ferreira_login")
+    if cookie_aluno:
+        # Se achou o cookie, loga o aluno automaticamente
+        st.session_state.logado = True
+        st.session_state.email = cookie_aluno
 
 # --- FUNÇÃO PARA CARREGAR A LOGO QUE VOCÊ SUBIU ---
 def get_base64_image(image_path):
@@ -104,26 +116,39 @@ if not st.session_state.logado:
         
         if st.button("ACESSAR"):
             try:
-                # Tenta ler os usuários. Se falhar, espera 1 segundo e tenta de novo uma única vez.
+                # Tenta ler os usuários
                 try:
                     usuarios = conn.read(worksheet="usuarios")
                 except:
                     import time
-                    time.sleep(1) # Pequena pausa para estabilizar a conexão
+                    time.sleep(1)
                     usuarios = conn.read(worksheet="usuarios")
                 
                 usuarios['email'] = usuarios['email'].astype(str).str.strip().str.lower()
                 usuarios['senha'] = usuarios['senha'].astype(str).str.strip()
                 
                 if ((usuarios['email'] == email_input) & (usuarios['senha'] == senha_input)).any():
+                    # --- SUCESSO NO LOGIN ---
                     st.session_state.logado = True
                     st.session_state.email = email_input
+                    
+                    # === PASSO 3: GRAVAR O COOKIE NO NAVEGADOR ===
+                    # Isso garante que ao minimizar ou fechar, o login persista.
+                    # Definimos por 30 dias para o aluno não ter que logar o mês todo.
+                    try:
+                        cookie_manager.set(
+                            cookie="jv_ferreira_login", 
+                            val=email_input, 
+                            expires_at=datetime.datetime.now() + datetime.timedelta(days=30)
+                        )
+                    except:
+                        pass # Evita que um erro no cookie impeça o login principal
+                    
                     st.rerun()
                 else: 
                     st.error("Credenciais inválidas.")
             except Exception as e: 
                 st.error("Instabilidade na rede. Tente clicar novamente em 1 segundo.")
-
 # --- ÁREA LOGADA ---
 else:
     # Cabeçalho Fixo da Área Interna
@@ -131,6 +156,7 @@ else:
     
     # Sidebar
     if st.sidebar.button("Sair"):
+        cookie_manager.delete("jv_ferreira_login") # Apaga o "crachá"
         st.session_state.logado = False
         st.rerun()
     
