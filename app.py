@@ -1,40 +1,44 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta  # Importação correta
 import plotly.express as px
 import time
 import base64
 import extra_streamlit_components as stx
 
-# Inicializa o gerenciador de cookies
+# --- 1. CONFIGURAÇÃO (SEMPRE O PRIMEIRO COMANDO ST) ---
+st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
+
+# --- 2. INICIALIZAÇÃO DE COMPONENTES ---
 cookie_manager = stx.CookieManager()
 
-# 1. Tenta recuperar o cookie de login se o session_state estiver vazio
+# Inicializa estado se vazio
 if 'logado' not in st.session_state:
     st.session_state.logado = False
     st.session_state.email = ""
 
-# 3. LÓGICA DE PERSISTÊNCIA (O "CRACHÁ")
-# Se não estiver logado no estado da sessão, tentamos ler o cookie
+# --- 3. LÓGICA DE PERSISTÊNCIA (CRACHÁ) ---
 if not st.session_state.logado:
     token = cookie_manager.get(cookie="jv_ferreira_login")
     if token:
         st.session_state.logado = True
         st.session_state.email = token
 
-# --- FUNÇÃO PARA CARREGAR A LOGO QUE VOCÊ SUBIU ---
+# --- FUNÇÃO DA LOGO ---
 def get_base64_image(image_path):
-    with open(image_path, "rb") as img_file:
-        return base64.b64encode(img_file.read()).decode()
+    try:
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    except:
+        return None
 
-try:
-    img_base64 = get_base64_image("JV Ferreira logo.jpeg")
-    logo_url = f"data:image/jpeg;base64,{img_base64}"
-except:
-    # Caso o arquivo não seja encontrado, ele tenta o link do Drive como backup
-    logo_url = "https://drive.google.com/uc?export=view&id=1oIpYQkIp4Y0M0vumaR5Tpa0yVDwSF7mc"   
-
+img_data = get_base64_image("JV Ferreira logo.jpeg")
+if img_data:
+    logo_url = f"data:image/jpeg;base64,{img_data}"
+else:
+    logo_url = "https://drive.google.com/uc?export=view&id=1oIpYQkIp4Y0M0vumaR5Tpa0yVDwSF7mc"
+    
 # --- 1. CONFIGURAÇÃO E CSS (RESTALREI O ORIGINAL 100%) ---
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
 
@@ -144,7 +148,7 @@ if not st.session_state.logado:
                         cookie_manager.set(
                             cookie="jv_ferreira_login", 
                             val=email_input, 
-                            expires_at=datetime.datetime.now() + datetime.timedelta(days=30)
+                            expires_at=datetime.datetime.now() + timedelta(days=30)
                         )
                     except:
                         pass # Evita que um erro no cookie impeça o login principal
