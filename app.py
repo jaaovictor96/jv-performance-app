@@ -164,10 +164,20 @@ else:
     
     # Sidebar
     if st.sidebar.button("Sair"):
-        cookie_manager.delete("jv_ferreira_login") # Apaga o "crachá"
-        time.sleep(0.5)
+        # 1. Verifica se o cookie existe antes de tentar deletar (Evita o KeyError)
+        todos_cookies = cookie_manager.get_all()
+        if "jv_ferreira_login" in todos_cookies:
+            try:
+                cookie_manager.delete("jv_ferreira_login")
+            except Exception:
+                pass # Se der erro mesmo assim, ignoramos para não travar a tela
+        
+        # 2. Limpa a sessão (Isso garante que ele saia da área logada na hora)
         st.session_state.logado = False
         st.session_state.email = ""
+        
+        # 3. Pequena pausa e reinício
+        time.sleep(0.5)
         st.rerun()
     
     st.sidebar.divider()
