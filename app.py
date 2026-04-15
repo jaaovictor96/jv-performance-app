@@ -1,25 +1,27 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import plotly.express as px
 import time
 import base64
 import extra_streamlit_components as stx
 
-# --- 1. CONFIGURAÇÃO E CSS (RESTALREI O ORIGINAL 100%) ---
-st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
-
 # Inicializa o gerenciador de cookies
 cookie_manager = stx.CookieManager()
 
 # 1. Tenta recuperar o cookie de login se o session_state estiver vazio
-if 'logado' not in st.session_state or not st.session_state.logado:
-    cookie_aluno = cookie_manager.get(cookie="jv_ferreira_login")
-    if cookie_aluno:
-        # Se achou o cookie, loga o aluno automaticamente
+if 'logado' not in st.session_state:
+    st.session_state.logado = False
+    st.session_state.email = ""
+
+# 3. LÓGICA DE PERSISTÊNCIA (O "CRACHÁ")
+# Se não estiver logado no estado da sessão, tentamos ler o cookie
+if not st.session_state.logado:
+    token = cookie_manager.get(cookie="jv_ferreira_login")
+    if token:
         st.session_state.logado = True
-        st.session_state.email = cookie_aluno
+        st.session_state.email = token
 
 # --- FUNÇÃO PARA CARREGAR A LOGO QUE VOCÊ SUBIU ---
 def get_base64_image(image_path):
@@ -32,6 +34,9 @@ try:
 except:
     # Caso o arquivo não seja encontrado, ele tenta o link do Drive como backup
     logo_url = "https://drive.google.com/uc?export=view&id=1oIpYQkIp4Y0M0vumaR5Tpa0yVDwSF7mc"   
+
+# --- 1. CONFIGURAÇÃO E CSS (RESTALREI O ORIGINAL 100%) ---
+st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
 
 URL_PLANILHA = "SUA_URL_AQUI"
 EMAIL_COACH = "jaaovictor96@gmail.com"
@@ -158,6 +163,7 @@ else:
     if st.sidebar.button("Sair"):
         cookie_manager.delete("jv_ferreira_login") # Apaga o "crachá"
         st.session_state.logado = False
+        st.session_state.email = ""
         st.rerun()
     
     st.sidebar.divider()
