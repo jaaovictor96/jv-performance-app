@@ -57,6 +57,14 @@ EMAIL_COACH = "jaaovictor96@gmail.com"
 
 conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 
+# --- LEITURA COM CACHE (evita chamadas repetidas a cada rerun) ---
+@st.cache_data(ttl=30)
+def ler_planilha(worksheet: str):
+    return conn.read(worksheet=worksheet)
+
+def ler_sem_cache(worksheet: str):
+    return conn.read(worksheet=worksheet, ttl=0)
+
 # --- 7. CSS GLOBAL ---
 st.markdown(f"""
     <style>
@@ -419,17 +427,24 @@ else:
     if ativar_dashboard:
         st.markdown("<h2 style='font-family: Space Grotesk; color: #F9C03D;'>ANÁLISE DE PERFORMANCE</h2>", unsafe_allow_html=True)
 
-        df_usuarios = conn.read(worksheet="usuarios", ttl=0)
-        df_coach = conn.read(worksheet="registros", ttl=0)
+        df_usuarios = ler_sem_cache("usuarios")
+        df_coach = ler_sem_cache("registros")
 
         if not df_usuarios.empty:
+            df_usuarios['email'] = df_usuarios['email'].astype(str).str.strip().str.lower()
             lista_nomes = df_usuarios['nome'].dropna().unique().tolist()
             nome_sel = st.selectbox("Selecione o Aluno:", lista_nomes)
-            email_vinculado = df_usuarios[df_usuarios['nome'] == nome_sel]['email'].iloc[0].strip().lower()
+            email_vinculado = df_usuarios[df_usuarios['nome'] == nome_sel]['email'].iloc[0]
 
             if not df_coach.empty:
                 df_coach['email_aluno'] = df_coach['email_aluno'].astype(str).str.strip().str.lower()
                 df_aluno = df_coach[df_coach['email_aluno'] == email_vinculado].copy()
+
+                # Debug temporário — remova após confirmar funcionamento
+                with st.expander("🔍 Debug (remova depois)"):
+                    st.write(f"Email buscado: `{email_vinculado}`")
+                    st.write(f"Emails em registros: {df_coach['email_aluno'].unique().tolist()}")
+                    st.write(f"Linhas encontradas: {len(df_aluno)}")
 
                 if not df_aluno.empty:
                     df_aluno['data'] = pd.to_datetime(df_aluno['data'], dayfirst=True)
@@ -448,7 +463,7 @@ else:
             st.divider()
             st.markdown("### 📋 Histórico de Check-ins")
             try:
-                df_checkins = conn.read(worksheet="checkins", ttl=0)
+                df_checkins = ler_sem_cache("checkins")
                 if not df_checkins.empty:
                     df_checkins['email'] = df_checkins['email'].astype(str).str.strip().str.lower()
                     df_checkins['data'] = pd.to_datetime(df_checkins['data'], dayfirst=True)
@@ -490,12 +505,12 @@ else:
         )
 
         try:
-            df_treinos = conn.read(worksheet="planilha_treinos", ttl=0)
+            df_treinos = ler_planilha("planilha_treinos")
             df_treinos['email_aluno'] = df_treinos['email_aluno'].astype(str).str.strip().str.lower()
             meus_treinos = df_treinos[df_treinos['email_aluno'] == st.session_state.email]
 
             try:
-                historico_geral = conn.read(worksheet="registros")
+                historico_geral = ler_planilha("registros")
                 historico_geral['email_aluno'] = historico_geral['email_aluno'].astype(str).str.strip().str.lower()
             except:
                 historico_geral = pd.DataFrame()
@@ -663,7 +678,7 @@ else:
                         )
                         st.session_state.notas_sessao = notas
 
-                        col_ant, col_fin = st.columns([1, 2])
+                        col_ant, col_fin = st.columns(2)
                         with col_ant:
                             if st.button("← Anterior", key="btn_ant_final", use_container_width=True):
                                 st.session_state.ex_index -= 1
@@ -671,7 +686,6 @@ else:
                         with col_fin:
                             st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
                             if st.button("FINALIZAR TREINO ✓", key="btn_finalizar", use_container_width=True):
-                                # Monta lista de registros
                                 lista_registros = []
                                 for i, r in exercicios_df.iterrows():
                                     lista_registros.append({
@@ -683,7 +697,7 @@ else:
                                         "comentario": st.session_state.notas_sessao
                                     })
                                 df_envio = pd.DataFrame(lista_registros)
-                                existente = conn.read(worksheet="registros", ttl=0)
+                                existente = ler_sem_cache("registros")
                                 df_final = pd.concat([existente, df_envio], ignore_index=True)
                                 conn.update(worksheet="registros", data=df_final)
                                 st.cache_data.clear()
@@ -691,12 +705,15 @@ else:
                                 st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
                     else:
-                        col_ant, col_prox = st.columns([1, 2])
+                        col_ant, col_prox = st.columns(2)
                         with col_ant:
+                            # Primeiro exercício: botão desabilitado visualmente
                             if idx_atual > 0:
                                 if st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True):
                                     st.session_state.ex_index -= 1
                                     st.rerun()
+                            else:
+                                st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True, disabled=True)
                         with col_prox:
                             st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
                             if st.button("Próximo →", key=f"btn_prox_{idx_atual}", use_container_width=True):
