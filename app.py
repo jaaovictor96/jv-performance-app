@@ -31,7 +31,11 @@ if 'notas_sessao' not in st.session_state:
     st.session_state.notas_sessao = ""
 
 # --- 4. PERSISTÊNCIA POR COOKIE ---
-if not st.session_state.logado:
+if 'saindo' not in st.session_state:
+    st.session_state.saindo = False
+
+# Só reloga pelo cookie se NÃO estiver saindo ativamente
+if not st.session_state.logado and not st.session_state.saindo:
     token = cookie_manager.get(cookie="jv_ferreira_login")
     if token:
         st.session_state.logado = True
@@ -319,6 +323,7 @@ if not st.session_state.logado:
                     if ((usuarios['email'] == email_input) & (usuarios['senha'] == senha_input)).any():
                         st.session_state.logado = True
                         st.session_state.email = email_input
+                        st.session_state.saindo = False  # libera o cookie para próximas sessões
                         try:
                             cookie_manager.set(
                                 cookie="jv_ferreira_login",
@@ -351,18 +356,23 @@ else:
     st.sidebar.divider()
 
     if st.sidebar.button("↩ Sair", use_container_width=True):
-        todos_cookies = cookie_manager.get_all()
-        if "jv_ferreira_login" in todos_cookies:
-            try:
+        # 1. Sinaliza que estamos saindo — impede o cookie de relogar no próximo ciclo
+        st.session_state.saindo = True
+        # 2. Deleta o cookie
+        try:
+            todos_cookies = cookie_manager.get_all()
+            if "jv_ferreira_login" in todos_cookies:
                 cookie_manager.delete("jv_ferreira_login")
-            except:
-                pass
+        except:
+            pass
+        # 3. Limpa toda a sessão
         st.session_state.logado = False
         st.session_state.email = ""
         st.session_state.ex_index = 0
         st.session_state.cargas_sessao = {}
         st.session_state.treino_finalizado = False
-        time.sleep(0.5)
+        st.session_state.notas_sessao = ""
+        time.sleep(0.3)
         st.rerun()
 
     st.sidebar.divider()
