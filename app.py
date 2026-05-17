@@ -128,10 +128,26 @@ def volume_anterior(historico: pd.DataFrame, email: str, treino: str,
 # --- 8. CSS GLOBAL ---
 st.markdown(f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@700;900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700;900&display=swap');
+
+    @keyframes fadeSlideUp {{
+        from {{ opacity: 0; transform: translateY(14px); }}
+        to   {{ opacity: 1; transform: translateY(0); }}
+    }}
+    @keyframes goldPulse {{
+        0%, 100% {{ box-shadow: 0 0 0 0 rgba(249,192,61,0); }}
+        50%        {{ box-shadow: 0 0 18px 4px rgba(249,192,61,0.18); }}
+    }}
+    @keyframes shimmer {{
+        0%   {{ background-position: -200% center; }}
+        100% {{ background-position: 200% center; }}
+    }}
+    @keyframes barGrow {{
+        from {{ width: 0%; }}
+    }}
 
     .stApp {{
-        background: linear-gradient(rgba(13,13,13,0.96), rgba(13,13,13,0.96)),
+        background: linear-gradient(rgba(10,10,10,0.97), rgba(10,10,10,0.97)),
                     url('{logo_url}');
         background-size: contain !important;
         background-position: center !important;
@@ -141,165 +157,225 @@ st.markdown(f"""
     [data-testid="stAppViewContainer"], [data-testid="stHeader"] {{
         background-color: transparent !important;
     }}
+    .block-container {{
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        padding-top: 2rem !important;
+    }}
 
     .main-title {{
         color: #F9C03D; font-family: 'Space Grotesk', sans-serif;
-        font-weight: 900; letter-spacing: -1px; text-align: center;
-        text-transform: uppercase; font-size: 2.5rem; margin-bottom: 0; line-height: 1;
+        font-weight: 900; letter-spacing: -2px; text-align: center;
+        text-transform: uppercase; font-size: clamp(2.2rem, 8vw, 3.5rem);
+        margin-bottom: 0; line-height: 0.95;
+        text-shadow: 0 0 40px rgba(249,192,61,0.25);
     }}
     .sub-title {{
-        text-align: center; color: #666; font-family: 'Inter', sans-serif;
-        font-size: 0.75rem; letter-spacing: 3px; margin-bottom: 32px; text-transform: uppercase;
+        text-align: center; color: #444; font-family: 'Inter', sans-serif;
+        font-size: 0.65rem; letter-spacing: 4px; margin: 10px 0 36px;
+        text-transform: uppercase;
     }}
 
-    /* ---- STREAK ---- */
     .streak-card {{
-        background: linear-gradient(135deg, rgba(249,192,61,0.12), rgba(249,192,61,0.04));
-        border: 1px solid rgba(249,192,61,0.25);
-        border-radius: 14px; padding: 16px 20px;
-        display: flex; align-items: center; gap: 14px; margin-bottom: 20px;
+        background: linear-gradient(135deg, rgba(249,192,61,0.10), rgba(249,192,61,0.03));
+        border: 1px solid rgba(249,192,61,0.22); border-radius: 18px;
+        padding: 18px 20px; display: flex; align-items: center; gap: 16px;
+        margin-bottom: 16px;
+        animation: fadeSlideUp 0.4s ease both, goldPulse 3s ease-in-out infinite;
     }}
-    .streak-emoji {{ font-size: 2rem; line-height: 1; }}
+    .streak-emoji {{ font-size: 2.2rem; line-height: 1; flex-shrink: 0; }}
     .streak-numero {{
         color: #F9C03D; font-family: 'Space Grotesk', sans-serif;
-        font-weight: 900; font-size: 2rem; line-height: 1;
+        font-weight: 900; font-size: 2.4rem; line-height: 1;
+        text-shadow: 0 0 20px rgba(249,192,61,0.4);
     }}
     .streak-label {{
-        color: #555; font-family: 'Inter', sans-serif;
-        font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+        color: #4a4a4a; font-family: 'Inter', sans-serif;
+        font-size: 9px; letter-spacing: 2.5px; text-transform: uppercase; margin-left: 4px;
     }}
     .streak-frase {{
-        color: #aaa; font-family: 'Inter', sans-serif; font-size: 12px; margin-top: 2px;
+        color: #888; font-family: 'Inter', sans-serif;
+        font-size: 12px; margin-top: 3px; font-style: italic;
     }}
 
-    /* ---- MENSAGEM DO COACH ---- */
     .coach-msg {{
-        background: rgba(28,27,27,0.9);
-        border-left: 3px solid #F9C03D;
-        border-radius: 0 12px 12px 0;
-        padding: 14px 18px; margin-bottom: 20px;
+        background: rgba(22,21,21,0.95); border-left: 3px solid #F9C03D;
+        border-radius: 0 14px 14px 0; padding: 14px 18px; margin-bottom: 16px;
+        animation: fadeSlideUp 0.45s ease both;
+        box-shadow: inset 0 0 30px rgba(249,192,61,0.03);
     }}
     .coach-msg-label {{
         color: #F9C03D; font-family: 'Inter', sans-serif;
-        font-size: 9px; font-weight: 600; letter-spacing: 2px;
-        text-transform: uppercase; margin-bottom: 4px;
+        font-size: 8px; font-weight: 700; letter-spacing: 3px;
+        text-transform: uppercase; margin-bottom: 6px; opacity: 0.8;
     }}
     .coach-msg-texto {{
-        color: #ccc; font-family: 'Inter', sans-serif; font-size: 13px; line-height: 1.5;
+        color: #bbb; font-family: 'Inter', sans-serif; font-size: 13px; line-height: 1.6;
     }}
 
-    /* ---- CARD EXERCÍCIO ---- */
     .ex-card {{
-        background: rgba(28,27,27,0.95); border-radius: 16px;
-        border-left: 4px solid #F9C03D; padding: 24px 20px 20px;
-        margin-bottom: 12px;
+        background: linear-gradient(145deg, rgba(26,25,25,0.98), rgba(20,19,19,0.98));
+        border-radius: 20px; border-left: 4px solid #F9C03D;
+        padding: 22px 20px 18px; margin-bottom: 14px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04);
+        animation: fadeSlideUp 0.35s ease both;
     }}
     .ex-label {{
         color: #F9C03D; font-family: 'Inter', sans-serif;
-        font-size: 10px; font-weight: 600; letter-spacing: 2px;
-        text-transform: uppercase; margin: 0 0 4px;
+        font-size: 9px; font-weight: 700; letter-spacing: 3px;
+        text-transform: uppercase; margin: 0 0 6px; opacity: 0.75;
     }}
     .ex-name {{
-        color: #FFF; font-family: 'Space Grotesk', sans-serif;
-        font-weight: 700; font-size: 1.5rem; text-transform: uppercase;
-        margin: 0 0 8px; line-height: 1.1;
+        color: #FFFFFF; font-family: 'Space Grotesk', sans-serif;
+        font-weight: 900; font-size: clamp(1.3rem, 5vw, 1.7rem);
+        text-transform: uppercase; margin: 0 0 10px; line-height: 1.05; letter-spacing: -0.5px;
     }}
-    .ex-meta {{ color: #777; font-family: 'Inter', sans-serif; font-size: 12px; margin: 0; letter-spacing: 1px; }}
-    .ex-pr {{ color: #F9C03D; font-family: 'Inter', sans-serif; font-size: 11px; opacity: 0.85; margin-top: 6px; }}
+    .ex-meta {{
+        color: #505050; font-family: 'Inter', sans-serif;
+        font-size: 11px; margin: 0; letter-spacing: 1.5px; text-transform: uppercase;
+    }}
+    .ex-pr {{
+        color: #F9C03D; font-family: 'Inter', sans-serif;
+        font-size: 11px; opacity: 0.7; margin-top: 8px;
+    }}
 
-    /* ---- PROGRESSO ---- */
     .progress-bar-bg {{
-        background: rgba(255,255,255,0.08); border-radius: 99px;
-        height: 6px; margin: 12px 0 4px; overflow: hidden;
+        background: rgba(255,255,255,0.06); border-radius: 99px;
+        height: 5px; overflow: hidden; margin: 12px 0 4px;
     }}
-    .progress-bar-fill {{ background: #F9C03D; border-radius: 99px; height: 6px; }}
+    .progress-bar-fill {{
+        background: linear-gradient(90deg, #c98a1a, #F9C03D, #ffe085);
+        border-radius: 99px; height: 5px;
+        animation: barGrow 0.5s cubic-bezier(.4,0,.2,1) both;
+        box-shadow: 0 0 8px rgba(249,192,61,0.5);
+    }}
     .progress-label {{
-        color: #555; font-family: 'Inter', sans-serif; font-size: 10px;
-        letter-spacing: 1px; text-align: right; margin-bottom: 16px;
+        color: #3a3a3a; font-family: 'Inter', sans-serif;
+        font-size: 10px; letter-spacing: 1px; text-align: right; margin: 5px 0 14px;
     }}
 
-    /* ---- CARGA ---- */
-    .carga-display {{ text-align: center; margin: 8px 0 4px; }}
+    .carga-display {{ text-align: center; margin: 16px 0 12px; animation: fadeSlideUp 0.3s ease both; }}
     .carga-valor {{
-        color: #FFF; font-family: 'Space Grotesk', sans-serif;
-        font-weight: 900; font-size: 3rem; line-height: 1;
+        color: #FFFFFF; font-family: 'Space Grotesk', sans-serif;
+        font-weight: 900; font-size: clamp(3rem, 14vw, 4.5rem);
+        line-height: 1; letter-spacing: -2px;
+        text-shadow: 0 0 30px rgba(255,255,255,0.08);
     }}
-    .carga-unit {{ color: #555; font-family: 'Inter', sans-serif; font-size: 14px; letter-spacing: 1px; }}
+    .carga-unit {{
+        color: #3a3a3a; font-family: 'Inter', sans-serif;
+        font-size: 13px; letter-spacing: 3px; text-transform: uppercase; margin-top: 2px;
+    }}
 
-    /* ---- BOTÕES ---- */
     div.stButton > button {{
-        background-color: rgba(32,31,31,0.9) !important; color: #FFF !important;
-        border: 1px solid #333 !important; border-radius: 10px !important;
+        background-color: rgba(24,23,23,0.95) !important; color: #FFFFFF !important;
+        border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 14px !important;
         font-family: 'Inter', sans-serif !important; font-weight: 600 !important;
-        font-size: 15px !important; padding: 10px 4px !important;
-        width: 100% !important; transition: all 0.15s ease !important;
+        font-size: 16px !important; padding: 14px 4px !important;
+        min-height: 52px !important; width: 100% !important;
+        transition: all 0.18s cubic-bezier(.4,0,.2,1) !important;
     }}
     div.stButton > button:hover {{
-        border-color: #F9C03D !important; color: #F9C03D !important;
-        background-color: rgba(249,192,61,0.08) !important;
+        border-color: rgba(249,192,61,0.4) !important; color: #F9C03D !important;
+        background-color: rgba(249,192,61,0.06) !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 16px rgba(249,192,61,0.08) !important;
+    }}
+    div.stButton > button:active {{
+        transform: scale(0.97) !important; transition: transform 0.08s ease !important;
     }}
     div.stButton > button:disabled {{
-        opacity: 0.25 !important; cursor: not-allowed !important;
+        opacity: 0.18 !important; cursor: not-allowed !important; transform: none !important;
     }}
     .btn-primary > div.stButton > button {{
-        background-color: #F9C03D !important; color: #0D0D0D !important;
-        border: none !important; font-weight: 700 !important;
-        font-size: 13px !important; letter-spacing: 1.5px !important;
-        padding: 14px 12px !important; text-transform: uppercase;
+        background: linear-gradient(135deg, #e8ac2a, #F9C03D, #ffd166) !important;
+        background-size: 200% auto !important; color: #0A0A0A !important;
+        border: none !important; font-weight: 800 !important;
+        font-size: 13px !important; letter-spacing: 2px !important;
+        padding: 16px 12px !important; min-height: 54px !important;
+        text-transform: uppercase;
+        box-shadow: 0 4px 20px rgba(249,192,61,0.25) !important;
+        transition: all 0.25s ease !important;
     }}
     .btn-primary > div.stButton > button:hover {{
-        background-color: #FFD166 !important; color: #0D0D0D !important;
+        animation: shimmer 1.2s linear infinite !important;
+        box-shadow: 0 6px 28px rgba(249,192,61,0.4) !important;
+        transform: translateY(-2px) !important; color: #0A0A0A !important;
+    }}
+    .btn-primary > div.stButton > button:active {{
+        transform: scale(0.97) translateY(0) !important;
+        box-shadow: 0 2px 10px rgba(249,192,61,0.2) !important;
     }}
 
-    /* ---- CONCLUSÃO ---- */
     .conclusao-card {{
-        background: rgba(28,27,27,0.95); border-radius: 16px; padding: 32px 24px;
-        text-align: center; border: 1px solid rgba(249,192,61,0.2); margin-bottom: 16px;
+        background: linear-gradient(160deg, rgba(26,25,25,0.98), rgba(18,17,17,0.98));
+        border-radius: 20px; padding: 36px 24px; text-align: center;
+        border: 1px solid rgba(249,192,61,0.15); margin-bottom: 16px;
+        box-shadow: 0 8px 40px rgba(0,0,0,0.5), 0 0 60px rgba(249,192,61,0.04);
+        animation: fadeSlideUp 0.4s ease both;
     }}
     .conclusao-titulo {{
         color: #F9C03D; font-family: 'Space Grotesk', sans-serif;
-        font-weight: 900; font-size: 1.8rem; text-transform: uppercase; margin: 8px 0;
+        font-weight: 900; font-size: clamp(1.5rem, 6vw, 2rem);
+        text-transform: uppercase; margin: 10px 0 6px; letter-spacing: -0.5px;
+        text-shadow: 0 0 30px rgba(249,192,61,0.3);
     }}
-    .conclusao-sub {{ color: #666; font-family: 'Inter', sans-serif; font-size: 13px; letter-spacing: 1px; }}
+    .conclusao-sub {{
+        color: #444; font-family: 'Inter', sans-serif;
+        font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase;
+    }}
     .record-badge {{
-        display: inline-block; background: rgba(249,192,61,0.12);
-        border: 1px solid rgba(249,192,61,0.3); border-radius: 8px;
-        padding: 8px 14px; margin: 4px; color: #F9C03D;
-        font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600;
+        display: inline-block; background: rgba(249,192,61,0.08);
+        border: 1px solid rgba(249,192,61,0.25); border-radius: 10px;
+        padding: 10px 16px; margin: 5px; color: #F9C03D;
+        font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 700;
+        animation: fadeSlideUp 0.4s ease both;
     }}
-    .record-badge span {{ color: #FFF; font-size: 11px; font-weight: 400; }}
+    .record-badge span {{ color: #888; font-size: 11px; font-weight: 400; }}
 
-    /* ---- STATS DE VOLUME ---- */
-    .stat-row {{ display: flex; gap: 10px; margin: 16px 0; }}
+    .stat-row {{ display: flex; gap: 8px; margin: 16px 0; }}
     .stat-box {{
-        flex: 1; background: rgba(28,27,27,0.9); border-radius: 12px;
-        padding: 14px 12px; text-align: center;
-        border: 1px solid rgba(255,255,255,0.06);
+        flex: 1; background: rgba(20,19,19,0.95); border-radius: 14px;
+        padding: 16px 10px; text-align: center;
+        border: 1px solid rgba(255,255,255,0.05);
+        box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+        animation: fadeSlideUp 0.4s ease both;
     }}
-    .stat-val {{
-        color: #FFF; font-family: 'Space Grotesk', sans-serif;
-        font-weight: 700; font-size: 1.3rem; line-height: 1;
-    }}
-    .stat-val.up {{ color: #4ade80; }}
-    .stat-val.down {{ color: #f87171; }}
-    .stat-lbl {{ color: #555; font-family: 'Inter', sans-serif; font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 4px; }}
+    .stat-val {{ color: #FFF; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.25rem; line-height: 1; }}
+    .stat-val.up  {{ color: #4ade80; text-shadow: 0 0 12px rgba(74,222,128,0.3); }}
+    .stat-val.down {{ color: #f87171; text-shadow: 0 0 12px rgba(248,113,113,0.3); }}
+    .stat-lbl {{ color: #383838; font-family: 'Inter', sans-serif; font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 5px; }}
 
-    /* ---- PR TABLE ---- */
     .pr-row {{
         display: flex; justify-content: space-between; align-items: center;
-        padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.05);
+        padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.04);
+        transition: background 0.15s ease;
     }}
     .pr-row:last-child {{ border-bottom: none; }}
-    .pr-nome {{ color: #ccc; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500; }}
-    .pr-carga {{ color: #F9C03D; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1rem; }}
-    .pr-data {{ color: #444; font-family: 'Inter', sans-serif; font-size: 10px; }}
+    .pr-row:hover {{ background: rgba(249,192,61,0.03); }}
+    .pr-nome {{ color: #bbb; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500; }}
+    .pr-carga {{ color: #F9C03D; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.05rem; }}
+    .pr-data {{ color: #333; font-family: 'Inter', sans-serif; font-size: 9px; letter-spacing: 0.5px; margin-top: 2px; }}
 
-    /* ---- INPUTS ---- */
-    input {{ background-color: #1c1b1b !important; color: white !important; border: 1px solid #2a2a2a !important; border-radius: 8px !important; }}
-    textarea {{ background-color: #1c1b1b !important; color: white !important; border: 1px solid #2a2a2a !important; border-radius: 8px !important; }}
+    input, textarea {{
+        background-color: #141313 !important; color: #ddd !important;
+        border: 1px solid rgba(255,255,255,0.08) !important;
+        border-radius: 12px !important; font-family: 'Inter', sans-serif !important;
+    }}
+    input:focus, textarea:focus {{
+        border-color: rgba(249,192,61,0.35) !important;
+        box-shadow: 0 0 0 2px rgba(249,192,61,0.08) !important;
+    }}
 
-    /* ---- SIDEBAR ---- */
-    [data-testid="stSidebar"] {{ background-color: rgba(16,16,16,0.97) !important; }}
+    [data-testid="stSidebar"] {{
+        background: linear-gradient(180deg, rgba(12,11,11,0.99), rgba(10,9,9,0.99)) !important;
+        border-right: 1px solid rgba(255,255,255,0.04) !important;
+    }}
+
+    hr {{ border-color: rgba(255,255,255,0.06) !important; margin: 20px 0 !important; }}
+
+    ::-webkit-scrollbar {{ width: 3px; }}
+    ::-webkit-scrollbar-track {{ background: transparent; }}
+    ::-webkit-scrollbar-thumb {{ background: rgba(249,192,61,0.2); border-radius: 99px; }}
     </style>
 """, unsafe_allow_html=True)
 
