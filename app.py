@@ -440,15 +440,18 @@ else:
     st.sidebar.divider()
 
     if st.sidebar.button("↩ Sair", use_container_width=True):
-        st.session_state.saindo = True
+        # 1. Deleta o cookie
         try:
             todos_cookies = cookie_manager.get_all()
             if "jv_ferreira_login" in todos_cookies:
                 cookie_manager.delete("jv_ferreira_login")
         except:
             pass
+        # 2. Reseta estado para defaults
         for k, v in defaults.items():
             st.session_state[k] = v
+        # 3. saindo=True DEPOIS do reset (impede cookie de relogar)
+        st.session_state.saindo = True
         time.sleep(0.3)
         st.rerun()
 
@@ -702,7 +705,7 @@ else:
             )
 
             try:
-                df_treinos = ler_planilha("planilha_treinos")
+                df_treinos = ler_sem_cache("planilha_treinos")
                 df_treinos['email_aluno'] = df_treinos['email_aluno'].astype(str).str.strip().str.lower()
                 meus_treinos = df_treinos[df_treinos['email_aluno'] == st.session_state.email]
 
