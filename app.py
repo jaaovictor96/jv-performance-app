@@ -14,27 +14,16 @@ st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="center
 cookie_manager = stx.CookieManager()
 
 # --- 3. INICIALIZAÇÃO DE ESTADO ---
-if 'logado' not in st.session_state:
-    st.session_state.logado = False
-    st.session_state.email = ""
-
-if 'ex_index' not in st.session_state:
-    st.session_state.ex_index = 0
-
-if 'cargas_sessao' not in st.session_state:
-    st.session_state.cargas_sessao = {}
-
-if 'treino_finalizado' not in st.session_state:
-    st.session_state.treino_finalizado = False
-
-if 'notas_sessao' not in st.session_state:
-    st.session_state.notas_sessao = ""
+defaults = {
+    'logado': False, 'email': '', 'saindo': False,
+    'ex_index': 0, 'cargas_sessao': {}, 'treino_finalizado': False,
+    'notas_sessao': '', 'aba_ativa': 'treino'
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 # --- 4. PERSISTÊNCIA POR COOKIE ---
-if 'saindo' not in st.session_state:
-    st.session_state.saindo = False
-
-# Só reloga pelo cookie se NÃO estiver saindo ativamente
 if not st.session_state.logado and not st.session_state.saindo:
     token = cookie_manager.get(cookie="jv_ferreira_login")
     if token:
@@ -50,18 +39,13 @@ def get_base64_image(image_path):
         return None
 
 img_data = get_base64_image("JV Ferreira logo.jpeg")
-if img_data:
-    logo_url = f"data:image/jpeg;base64,{img_data}"
-else:
-    logo_url = "https://drive.google.com/uc?export=view&id=1oIpYQkIp4Y0M0vumaR5Tpa0yVDwSF7mc"
+logo_url = f"data:image/jpeg;base64,{img_data}" if img_data else \
+    "https://drive.google.com/uc?export=view&id=1oIpYQkIp4Y0M0vumaR5Tpa0yVDwSF7mc"
 
 # --- 6. CONFIGURAÇÃO ---
-URL_PLANILHA = "SUA_URL_AQUI"
 EMAIL_COACH = "jaaovictor96@gmail.com"
-
 conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 
-# --- LEITURA COM CACHE (evita chamadas repetidas a cada rerun) ---
 @st.cache_data(ttl=30)
 def ler_planilha(worksheet: str):
     return conn.read(worksheet=worksheet)
@@ -69,14 +53,85 @@ def ler_planilha(worksheet: str):
 def ler_sem_cache(worksheet: str):
     return conn.read(worksheet=worksheet, ttl=0)
 
-# --- 7. CSS GLOBAL ---
+# --- 7. FUNÇÕES DE ENGAJAMENTO ---
+
+def calcular_streak(historico: pd.DataFrame, email: str) -> int:
+    if historico.empty:
+        return 0
+    df = historico[historico['email_aluno'] == email].copy()
+    if df.empty:
+        return 0
+    try:
+        df['data_dt'] = pd.to_datetime(df['data'], dayfirst=True).dt.date
+        dias = sorted(df['data_dt'].unique(), reverse=True)
+        hoje = datetime.now().date()
+        ontem = hoje - timedelta(days=1)
+        if dias[0] not in (hoje, ontem):
+            return 0
+        streak = 1
+        for i in range(1, len(dias)):
+            if (dias[i - 1] - dias[i]).days == 1:
+                streak += 1
+            else:
+                break
+        return streak
+    except:
+        return 0
+
+def frases_streak(streak: int) -> tuple:
+    if streak == 0:
+        return "💤", "Hora de voltar à ação!"
+    elif streak == 1:
+        return "🔥", "Primeiro passo dado. Não pare agora!"
+    elif streak <= 3:
+        return "⚡", f"{streak} dias seguidos. O hábito está se formando."
+    elif streak <= 7:
+        return "🚀", f"{streak} dias consecutivos. Você está em chamas!"
+    elif streak <= 14:
+        return "💎", f"{streak} dias! Consistência de atleta de elite."
+    else:
+        return "🏆", f"{streak} dias seguidos. Você é imparável!"
+
+def calcular_volume(exercicios_df: pd.DataFrame, cargas: dict) -> float:
+    total = 0.0
+    for idx, row in exercicios_df.iterrows():
+        carga = cargas.get(f"carga_{idx}", 0)
+        series = int(float(row['series'])) if pd.notnull(row.get('series')) else 0
+        reps = int(float(row['reps'])) if pd.notnull(row.get('reps')) else 0
+        total += carga * series * reps
+    return total
+
+def volume_anterior(historico: pd.DataFrame, email: str, treino: str,
+                    exercicios_df: pd.DataFrame) -> float:
+    if historico.empty:
+        return 0.0
+    df = historico[(historico['email_aluno'] == email) &
+                   (historico['treino'] == treino)].copy()
+    if df.empty:
+        return 0.0
+    try:
+        df['data_dt'] = pd.to_datetime(df['data'], dayfirst=True)
+        ultima_data = df['data_dt'].max()
+        df_ult = df[df['data_dt'] == ultima_data]
+        total = 0.0
+        for _, row in exercicios_df.iterrows():
+            filtro = df_ult[df_ult['exercicio'] == row['exercicio']]
+            if not filtro.empty:
+                carga = float(filtro.iloc[-1]['carga'])
+                series = int(float(row['series'])) if pd.notnull(row.get('series')) else 0
+                reps = int(float(row['reps'])) if pd.notnull(row.get('reps')) else 0
+                total += carga * series * reps
+        return total
+    except:
+        return 0.0
+
+# --- 8. CSS GLOBAL ---
 st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@700;900&display=swap');
 
-    /* ---- FUNDO ---- */
     .stApp {{
-        background: linear-gradient(rgba(13, 13, 13, 0.96), rgba(13, 13, 13, 0.96)),
+        background: linear-gradient(rgba(13,13,13,0.96), rgba(13,13,13,0.96)),
                     url('{logo_url}');
         background-size: contain !important;
         background-position: center !important;
@@ -87,210 +142,164 @@ st.markdown(f"""
         background-color: transparent !important;
     }}
 
-    /* ---- TIPOGRAFIA ---- */
     .main-title {{
-        color: #F9C03D;
-        font-family: 'Space Grotesk', sans-serif;
-        font-weight: 900;
-        letter-spacing: -1px;
-        text-align: center;
-        text-transform: uppercase;
-        font-size: 2.5rem;
-        margin-bottom: 0;
-        line-height: 1;
+        color: #F9C03D; font-family: 'Space Grotesk', sans-serif;
+        font-weight: 900; letter-spacing: -1px; text-align: center;
+        text-transform: uppercase; font-size: 2.5rem; margin-bottom: 0; line-height: 1;
     }}
     .sub-title {{
-        text-align: center;
-        color: #666;
-        font-family: 'Inter', sans-serif;
-        font-size: 0.75rem;
-        letter-spacing: 3px;
-        margin-bottom: 32px;
-        text-transform: uppercase;
+        text-align: center; color: #666; font-family: 'Inter', sans-serif;
+        font-size: 0.75rem; letter-spacing: 3px; margin-bottom: 32px; text-transform: uppercase;
     }}
 
-    /* ---- CARD DO EXERCÍCIO ---- */
+    /* ---- STREAK ---- */
+    .streak-card {{
+        background: linear-gradient(135deg, rgba(249,192,61,0.12), rgba(249,192,61,0.04));
+        border: 1px solid rgba(249,192,61,0.25);
+        border-radius: 14px; padding: 16px 20px;
+        display: flex; align-items: center; gap: 14px; margin-bottom: 20px;
+    }}
+    .streak-emoji {{ font-size: 2rem; line-height: 1; }}
+    .streak-numero {{
+        color: #F9C03D; font-family: 'Space Grotesk', sans-serif;
+        font-weight: 900; font-size: 2rem; line-height: 1;
+    }}
+    .streak-label {{
+        color: #555; font-family: 'Inter', sans-serif;
+        font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+    }}
+    .streak-frase {{
+        color: #aaa; font-family: 'Inter', sans-serif; font-size: 12px; margin-top: 2px;
+    }}
+
+    /* ---- MENSAGEM DO COACH ---- */
+    .coach-msg {{
+        background: rgba(28,27,27,0.9);
+        border-left: 3px solid #F9C03D;
+        border-radius: 0 12px 12px 0;
+        padding: 14px 18px; margin-bottom: 20px;
+    }}
+    .coach-msg-label {{
+        color: #F9C03D; font-family: 'Inter', sans-serif;
+        font-size: 9px; font-weight: 600; letter-spacing: 2px;
+        text-transform: uppercase; margin-bottom: 4px;
+    }}
+    .coach-msg-texto {{
+        color: #ccc; font-family: 'Inter', sans-serif; font-size: 13px; line-height: 1.5;
+    }}
+
+    /* ---- CARD EXERCÍCIO ---- */
     .ex-card {{
-        background: rgba(28, 27, 27, 0.95);
-        border-radius: 16px;
-        border-left: 4px solid #F9C03D;
-        padding: 24px 20px 20px 20px;
+        background: rgba(28,27,27,0.95); border-radius: 16px;
+        border-left: 4px solid #F9C03D; padding: 24px 20px 20px;
         margin-bottom: 12px;
-        position: relative;
     }}
     .ex-label {{
-        color: #F9C03D;
-        font-family: 'Inter', sans-serif;
-        font-size: 10px;
-        font-weight: 600;
-        letter-spacing: 2px;
-        text-transform: uppercase;
-        margin: 0 0 4px 0;
+        color: #F9C03D; font-family: 'Inter', sans-serif;
+        font-size: 10px; font-weight: 600; letter-spacing: 2px;
+        text-transform: uppercase; margin: 0 0 4px;
     }}
     .ex-name {{
-        color: #FFFFFF;
-        font-family: 'Space Grotesk', sans-serif;
-        font-weight: 700;
-        font-size: 1.5rem;
-        text-transform: uppercase;
-        margin: 0 0 8px 0;
-        line-height: 1.1;
+        color: #FFF; font-family: 'Space Grotesk', sans-serif;
+        font-weight: 700; font-size: 1.5rem; text-transform: uppercase;
+        margin: 0 0 8px; line-height: 1.1;
     }}
-    .ex-meta {{
-        color: #777;
-        font-family: 'Inter', sans-serif;
-        font-size: 12px;
-        margin: 0;
-        letter-spacing: 1px;
-    }}
-    .ex-pr {{
-        color: #F9C03D;
-        font-family: 'Inter', sans-serif;
-        font-size: 11px;
-        opacity: 0.85;
-        margin-top: 6px;
-    }}
+    .ex-meta {{ color: #777; font-family: 'Inter', sans-serif; font-size: 12px; margin: 0; letter-spacing: 1px; }}
+    .ex-pr {{ color: #F9C03D; font-family: 'Inter', sans-serif; font-size: 11px; opacity: 0.85; margin-top: 6px; }}
 
-    /* ---- BARRA DE PROGRESSO ---- */
+    /* ---- PROGRESSO ---- */
     .progress-bar-bg {{
-        background: rgba(255,255,255,0.08);
-        border-radius: 99px;
-        height: 6px;
-        margin: 12px 0 4px 0;
-        overflow: hidden;
+        background: rgba(255,255,255,0.08); border-radius: 99px;
+        height: 6px; margin: 12px 0 4px; overflow: hidden;
     }}
-    .progress-bar-fill {{
-        background: #F9C03D;
-        border-radius: 99px;
-        height: 6px;
-        transition: width 0.4s ease;
-    }}
+    .progress-bar-fill {{ background: #F9C03D; border-radius: 99px; height: 6px; }}
     .progress-label {{
-        color: #555;
-        font-family: 'Inter', sans-serif;
-        font-size: 10px;
-        letter-spacing: 1px;
-        text-align: right;
-        margin-bottom: 16px;
+        color: #555; font-family: 'Inter', sans-serif; font-size: 10px;
+        letter-spacing: 1px; text-align: right; margin-bottom: 16px;
     }}
 
-    /* ---- DISPLAY DE CARGA ---- */
-    .carga-display {{
-        text-align: center;
-        margin: 8px 0 4px 0;
-    }}
+    /* ---- CARGA ---- */
+    .carga-display {{ text-align: center; margin: 8px 0 4px; }}
     .carga-valor {{
-        color: #FFFFFF;
-        font-family: 'Space Grotesk', sans-serif;
-        font-weight: 900;
-        font-size: 3rem;
-        line-height: 1;
+        color: #FFF; font-family: 'Space Grotesk', sans-serif;
+        font-weight: 900; font-size: 3rem; line-height: 1;
     }}
-    .carga-unit {{
-        color: #555;
-        font-family: 'Inter', sans-serif;
-        font-size: 14px;
-        letter-spacing: 1px;
-    }}
+    .carga-unit {{ color: #555; font-family: 'Inter', sans-serif; font-size: 14px; letter-spacing: 1px; }}
 
-    /* ---- BOTÕES DE AJUSTE ---- */
+    /* ---- BOTÕES ---- */
     div.stButton > button {{
-        background-color: rgba(32, 31, 31, 0.9) !important;
-        color: #FFFFFF !important;
-        border: 1px solid #333 !important;
-        border-radius: 10px !important;
-        font-family: 'Inter', sans-serif !important;
-        font-weight: 600 !important;
-        font-size: 15px !important;
-        padding: 10px 4px !important;
-        width: 100% !important;
-        transition: all 0.15s ease !important;
+        background-color: rgba(32,31,31,0.9) !important; color: #FFF !important;
+        border: 1px solid #333 !important; border-radius: 10px !important;
+        font-family: 'Inter', sans-serif !important; font-weight: 600 !important;
+        font-size: 15px !important; padding: 10px 4px !important;
+        width: 100% !important; transition: all 0.15s ease !important;
     }}
     div.stButton > button:hover {{
-        border-color: #F9C03D !important;
-        color: #F9C03D !important;
+        border-color: #F9C03D !important; color: #F9C03D !important;
         background-color: rgba(249,192,61,0.08) !important;
     }}
-
-    /* ---- BOTÃO PRIMÁRIO (AÇÃO PRINCIPAL) ---- */
+    div.stButton > button:disabled {{
+        opacity: 0.25 !important; cursor: not-allowed !important;
+    }}
     .btn-primary > div.stButton > button {{
-        background-color: #F9C03D !important;
-        color: #0D0D0D !important;
-        border: none !important;
-        font-weight: 700 !important;
-        font-size: 13px !important;
-        letter-spacing: 1.5px !important;
-        padding: 14px 12px !important;
-        text-transform: uppercase;
+        background-color: #F9C03D !important; color: #0D0D0D !important;
+        border: none !important; font-weight: 700 !important;
+        font-size: 13px !important; letter-spacing: 1.5px !important;
+        padding: 14px 12px !important; text-transform: uppercase;
     }}
     .btn-primary > div.stButton > button:hover {{
-        background-color: #FFD166 !important;
-        color: #0D0D0D !important;
+        background-color: #FFD166 !important; color: #0D0D0D !important;
     }}
 
-    /* ---- TELA DE CONCLUSÃO ---- */
+    /* ---- CONCLUSÃO ---- */
     .conclusao-card {{
-        background: rgba(28, 27, 27, 0.95);
-        border-radius: 16px;
-        padding: 32px 24px;
-        text-align: center;
-        border: 1px solid rgba(249,192,61,0.2);
-        margin-bottom: 16px;
-    }}
-    .conclusao-emoji {{
-        font-size: 3rem;
-        margin-bottom: 8px;
+        background: rgba(28,27,27,0.95); border-radius: 16px; padding: 32px 24px;
+        text-align: center; border: 1px solid rgba(249,192,61,0.2); margin-bottom: 16px;
     }}
     .conclusao-titulo {{
-        color: #F9C03D;
-        font-family: 'Space Grotesk', sans-serif;
-        font-weight: 900;
-        font-size: 1.8rem;
-        text-transform: uppercase;
-        margin: 0 0 8px 0;
+        color: #F9C03D; font-family: 'Space Grotesk', sans-serif;
+        font-weight: 900; font-size: 1.8rem; text-transform: uppercase; margin: 8px 0;
     }}
-    .conclusao-sub {{
-        color: #666;
-        font-family: 'Inter', sans-serif;
-        font-size: 13px;
-        letter-spacing: 1px;
-    }}
+    .conclusao-sub {{ color: #666; font-family: 'Inter', sans-serif; font-size: 13px; letter-spacing: 1px; }}
     .record-badge {{
-        display: inline-block;
-        background: rgba(249,192,61,0.12);
-        border: 1px solid rgba(249,192,61,0.3);
-        border-radius: 8px;
-        padding: 8px 14px;
-        margin: 4px;
-        color: #F9C03D;
-        font-family: 'Inter', sans-serif;
-        font-size: 12px;
-        font-weight: 600;
+        display: inline-block; background: rgba(249,192,61,0.12);
+        border: 1px solid rgba(249,192,61,0.3); border-radius: 8px;
+        padding: 8px 14px; margin: 4px; color: #F9C03D;
+        font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600;
     }}
-    .record-badge span {{
-        color: #FFFFFF;
-        font-size: 11px;
-        font-weight: 400;
+    .record-badge span {{ color: #FFF; font-size: 11px; font-weight: 400; }}
+
+    /* ---- STATS DE VOLUME ---- */
+    .stat-row {{ display: flex; gap: 10px; margin: 16px 0; }}
+    .stat-box {{
+        flex: 1; background: rgba(28,27,27,0.9); border-radius: 12px;
+        padding: 14px 12px; text-align: center;
+        border: 1px solid rgba(255,255,255,0.06);
     }}
+    .stat-val {{
+        color: #FFF; font-family: 'Space Grotesk', sans-serif;
+        font-weight: 700; font-size: 1.3rem; line-height: 1;
+    }}
+    .stat-val.up {{ color: #4ade80; }}
+    .stat-val.down {{ color: #f87171; }}
+    .stat-lbl {{ color: #555; font-family: 'Inter', sans-serif; font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 4px; }}
+
+    /* ---- PR TABLE ---- */
+    .pr-row {{
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.05);
+    }}
+    .pr-row:last-child {{ border-bottom: none; }}
+    .pr-nome {{ color: #ccc; font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500; }}
+    .pr-carga {{ color: #F9C03D; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1rem; }}
+    .pr-data {{ color: #444; font-family: 'Inter', sans-serif; font-size: 10px; }}
 
     /* ---- INPUTS ---- */
-    input {{
-        background-color: #1c1b1b !important;
-        color: white !important;
-        border: 1px solid #2a2a2a !important;
-        border-radius: 8px !important;
-    }}
-    textarea {{
-        background-color: #1c1b1b !important;
-        color: white !important;
-        border: 1px solid #2a2a2a !important;
-        border-radius: 8px !important;
-    }}
+    input {{ background-color: #1c1b1b !important; color: white !important; border: 1px solid #2a2a2a !important; border-radius: 8px !important; }}
+    textarea {{ background-color: #1c1b1b !important; color: white !important; border: 1px solid #2a2a2a !important; border-radius: 8px !important; }}
 
     /* ---- SIDEBAR ---- */
-    [data-testid="stSidebar"] {{
-        background-color: rgba(16,16,16,0.97) !important;
-    }}
+    [data-testid="stSidebar"] {{ background-color: rgba(16,16,16,0.97) !important; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -307,37 +316,36 @@ if not st.session_state.logado:
         email_input = st.text_input("E-mail do Atleta", placeholder="atleta@exemplo.com").strip().lower()
         senha_input = st.text_input("Senha", type="password", placeholder="••••••").strip()
 
-        with st.container():
-            st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-            if st.button("ACESSAR", use_container_width=True):
+        st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+        if st.button("ACESSAR", use_container_width=True):
+            try:
                 try:
+                    usuarios = conn.read(worksheet="usuarios")
+                except:
+                    time.sleep(1)
+                    usuarios = conn.read(worksheet="usuarios")
+
+                usuarios['email'] = usuarios['email'].astype(str).str.strip().str.lower()
+                usuarios['senha'] = usuarios['senha'].astype(str).str.strip()
+
+                if ((usuarios['email'] == email_input) & (usuarios['senha'] == senha_input)).any():
+                    st.session_state.logado = True
+                    st.session_state.email = email_input
+                    st.session_state.saindo = False
                     try:
-                        usuarios = conn.read(worksheet="usuarios")
+                        cookie_manager.set(
+                            cookie="jv_ferreira_login",
+                            val=email_input,
+                            expires_at=datetime.now() + timedelta(days=30)
+                        )
                     except:
-                        time.sleep(1)
-                        usuarios = conn.read(worksheet="usuarios")
-
-                    usuarios['email'] = usuarios['email'].astype(str).str.strip().str.lower()
-                    usuarios['senha'] = usuarios['senha'].astype(str).str.strip()
-
-                    if ((usuarios['email'] == email_input) & (usuarios['senha'] == senha_input)).any():
-                        st.session_state.logado = True
-                        st.session_state.email = email_input
-                        st.session_state.saindo = False  # libera o cookie para próximas sessões
-                        try:
-                            cookie_manager.set(
-                                cookie="jv_ferreira_login",
-                                val=email_input,
-                                expires_at=datetime.now() + timedelta(days=30)
-                            )
-                        except:
-                            pass
-                        st.rerun()
-                    else:
-                        st.error("Credenciais inválidas.")
-                except Exception as e:
-                    st.error("Instabilidade na rede. Tente novamente em 1 segundo.")
-            st.markdown('</div>', unsafe_allow_html=True)
+                        pass
+                    st.rerun()
+                else:
+                    st.error("Credenciais inválidas.")
+            except:
+                st.error("Instabilidade na rede. Tente novamente em 1 segundo.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ==========================================================
@@ -346,32 +354,25 @@ if not st.session_state.logado:
 else:
     # ---- SIDEBAR ----
     st.sidebar.markdown(
-        "<p style='color:#F9C03D; font-family:Space Grotesk; font-weight:900; font-size:1rem; letter-spacing:2px; text-transform:uppercase;'>JV Performance</p>",
+        "<p style='color:#F9C03D;font-family:Space Grotesk;font-weight:900;font-size:1rem;letter-spacing:2px;text-transform:uppercase;'>JV Performance</p>",
         unsafe_allow_html=True
     )
     st.sidebar.markdown(
-        f"<p style='color:#555; font-family:Inter; font-size:11px; margin-top:-12px;'>{st.session_state.email}</p>",
+        f"<p style='color:#555;font-family:Inter;font-size:11px;margin-top:-12px;'>{st.session_state.email}</p>",
         unsafe_allow_html=True
     )
     st.sidebar.divider()
 
     if st.sidebar.button("↩ Sair", use_container_width=True):
-        # 1. Sinaliza que estamos saindo — impede o cookie de relogar no próximo ciclo
         st.session_state.saindo = True
-        # 2. Deleta o cookie
         try:
             todos_cookies = cookie_manager.get_all()
             if "jv_ferreira_login" in todos_cookies:
                 cookie_manager.delete("jv_ferreira_login")
         except:
             pass
-        # 3. Limpa toda a sessão
-        st.session_state.logado = False
-        st.session_state.email = ""
-        st.session_state.ex_index = 0
-        st.session_state.cargas_sessao = {}
-        st.session_state.treino_finalizado = False
-        st.session_state.notas_sessao = ""
+        for k, v in defaults.items():
+            st.session_state[k] = v
         time.sleep(0.3)
         st.rerun()
 
@@ -383,11 +384,11 @@ else:
         if st.button("ATUALIZAR SENHA"):
             if nova_senha == confirma_senha and len(nova_senha) >= 4:
                 try:
-                    df_usuarios = conn.read(worksheet="usuarios", ttl=0)
-                    mask = df_usuarios['email'].astype(str).str.strip().str.lower() == st.session_state.email.lower()
+                    df_u = ler_sem_cache("usuarios")
+                    mask = df_u['email'].astype(str).str.strip().str.lower() == st.session_state.email.lower()
                     if mask.any():
-                        df_usuarios.loc[mask, 'senha'] = str(nova_senha).strip()
-                        conn.update(worksheet="usuarios", data=df_usuarios)
+                        df_u.loc[mask, 'senha'] = str(nova_senha).strip()
+                        conn.update(worksheet="usuarios", data=df_u)
                         st.sidebar.success("Senha alterada!")
                         time.sleep(1)
                         st.rerun()
@@ -405,21 +406,16 @@ else:
             st.markdown("##### Relatório de Evolução")
             peso_atual = st.number_input("Peso Atual (kg)", min_value=30.0, step=0.1)
             feedback = st.text_area("Como se sentiu (Fome, Sono, Treino)?")
-            enviar_checkin = st.form_submit_button("ENVIAR PARA O COACH")
-            if enviar_checkin:
+            if st.form_submit_button("ENVIAR PARA O COACH"):
                 try:
                     try:
-                        df_existente = conn.read(worksheet="checkins", ttl=0)
+                        df_ci = ler_sem_cache("checkins")
                     except:
-                        df_existente = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
-                    novo = pd.DataFrame([{
-                        "data": datetime.now().strftime("%d/%m/%Y"),
-                        "email": st.session_state.email,
-                        "peso": peso_atual,
-                        "feedback": feedback
-                    }])
-                    df_atualizado = pd.concat([df_existente, novo], ignore_index=True)
-                    conn.update(worksheet="checkins", data=df_atualizado)
+                        df_ci = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
+                    novo = pd.DataFrame([{"data": datetime.now().strftime("%d/%m/%Y"),
+                                          "email": st.session_state.email,
+                                          "peso": peso_atual, "feedback": feedback}])
+                    conn.update(worksheet="checkins", data=pd.concat([df_ci, novo], ignore_index=True))
                     st.sidebar.success("Check-in enviado! 🚀")
                 except Exception as e:
                     st.sidebar.error(f"Erro: {e}")
@@ -435,23 +431,21 @@ else:
     # DASHBOARD DO COACH
     # ==========================================================
     if ativar_dashboard:
-        st.markdown("<h2 style='font-family: Space Grotesk; color: #F9C03D;'>ANÁLISE DE PERFORMANCE</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='font-family:Space Grotesk;color:#F9C03D;'>ANÁLISE DE PERFORMANCE</h2>", unsafe_allow_html=True)
 
         df_usuarios = ler_sem_cache("usuarios")
         df_coach = ler_sem_cache("registros")
 
         if not df_usuarios.empty:
             df_usuarios['email'] = df_usuarios['email'].astype(str).str.strip().str.lower()
-            lista_nomes = df_usuarios['nome'].dropna().unique().tolist()
-            nome_sel = st.selectbox("Selecione o Aluno:", lista_nomes)
+            nome_sel = st.selectbox("Selecione o Aluno:", df_usuarios['nome'].dropna().unique().tolist())
             email_vinculado = df_usuarios[df_usuarios['nome'] == nome_sel]['email'].iloc[0]
 
             if not df_coach.empty:
                 df_coach['email_aluno'] = df_coach['email_aluno'].astype(str).str.strip().str.lower()
                 df_aluno = df_coach[df_coach['email_aluno'] == email_vinculado].copy()
 
-                # Debug temporário — remova após confirmar funcionamento
-                with st.expander("🔍 Debug (remova depois)"):
+                with st.expander("🔍 Debug (remova após confirmar)"):
                     st.write(f"Email buscado: `{email_vinculado}`")
                     st.write(f"Emails em registros: {df_coach['email_aluno'].unique().tolist()}")
                     st.write(f"Linhas encontradas: {len(df_aluno)}")
@@ -461,7 +455,6 @@ else:
                     exercicio_sel = st.selectbox("Exercício:", df_aluno['exercicio'].unique())
                     df_prog = df_aluno[df_aluno['exercicio'] == exercicio_sel].sort_values('data')
                     df_prog['data_display'] = df_prog['data'].dt.strftime('%d/%m/%Y')
-
                     fig = px.line(df_prog, x='data_display', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
                     fig.update_traces(line_color='#F9C03D')
                     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
@@ -473,263 +466,388 @@ else:
             st.divider()
             st.markdown("### 📋 Histórico de Check-ins")
             try:
-                df_checkins = ler_sem_cache("checkins")
-                if not df_checkins.empty:
-                    df_checkins['email'] = df_checkins['email'].astype(str).str.strip().str.lower()
-                    df_checkins['data'] = pd.to_datetime(df_checkins['data'], dayfirst=True)
-                    df_filtrado = df_checkins[df_checkins['email'] == email_vinculado].sort_values('data')
-
-                    if not df_filtrado.empty:
-                        st.dataframe(
-                            df_filtrado.sort_values('data', ascending=False),
+                df_ci = ler_sem_cache("checkins")
+                if not df_ci.empty:
+                    df_ci['email'] = df_ci['email'].astype(str).str.strip().str.lower()
+                    df_ci['data'] = pd.to_datetime(df_ci['data'], dayfirst=True)
+                    df_f = df_ci[df_ci['email'] == email_vinculado].sort_values('data')
+                    if not df_f.empty:
+                        st.dataframe(df_f.sort_values('data', ascending=False),
                             column_config={
                                 "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
                                 "email": None,
                                 "peso": st.column_config.NumberColumn("Peso (kg)", format="%.1f"),
                                 "feedback": "Relato do Aluno"
-                            },
-                            hide_index=True,
-                            use_container_width=True
-                        )
-                        df_filtrado['data_display'] = df_filtrado['data'].dt.strftime('%d/%m/%Y')
-                        fig_peso = px.line(df_filtrado, x='data_display', y='peso', markers=True, title=f"Evolução de Peso — {nome_sel}")
-                        fig_peso.update_traces(line_color='#F9C03D')
-                        fig_peso.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
-                        fig_peso.update_xaxes(type='category', title="Data do Check-in")
-                        st.plotly_chart(fig_peso, use_container_width=True)
+                            }, hide_index=True, use_container_width=True)
+                        df_f['data_display'] = df_f['data'].dt.strftime('%d/%m/%Y')
+                        fig_p = px.line(df_f, x='data_display', y='peso', markers=True, title=f"Evolução de Peso — {nome_sel}")
+                        fig_p.update_traces(line_color='#F9C03D')
+                        fig_p.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
+                        fig_p.update_xaxes(type='category', title="Data do Check-in")
+                        st.plotly_chart(fig_p, use_container_width=True)
                     else:
                         st.info(f"Nenhum check-in para {nome_sel}.")
                 else:
                     st.info("Aba de check-ins está vazia.")
             except Exception as e:
-                st.error(f"Erro ao carregar check-ins: {e}")
+                st.error(f"Erro check-ins: {e}")
 
     # ==========================================================
-    # PROTOCOLO DIÁRIO — FLUXO PASSO A PASSO
+    # ÁREA DO ATLETA
     # ==========================================================
     else:
-        st.markdown(
-            "<h2 style='font-family: Space Grotesk; font-size: 2rem; font-weight: 900; line-height: 1; margin-bottom: 4px;'>"
-            "PROTOCOLO <span style='color: #F9C03D;'>DIÁRIO</span></h2>",
-            unsafe_allow_html=True
-        )
-
+        # Carrega histórico uma vez para toda a área do atleta
         try:
-            df_treinos = ler_planilha("planilha_treinos")
-            df_treinos['email_aluno'] = df_treinos['email_aluno'].astype(str).str.strip().str.lower()
-            meus_treinos = df_treinos[df_treinos['email_aluno'] == st.session_state.email]
+            historico_geral = ler_planilha("registros")
+            historico_geral['email_aluno'] = historico_geral['email_aluno'].astype(str).str.strip().str.lower()
+        except:
+            historico_geral = pd.DataFrame()
 
-            try:
-                historico_geral = ler_planilha("registros")
-                historico_geral['email_aluno'] = historico_geral['email_aluno'].astype(str).str.strip().str.lower()
-            except:
-                historico_geral = pd.DataFrame()
+        # ---- STREAK ----
+        streak = calcular_streak(historico_geral, st.session_state.email)
+        emoji_s, frase_s = frases_streak(streak)
+        st.markdown(f"""
+            <div class='streak-card'>
+                <div class='streak-emoji'>{emoji_s}</div>
+                <div>
+                    <div style='display:flex;align-items:baseline;gap:6px;'>
+                        <span class='streak-numero'>{streak}</span>
+                        <span class='streak-label'>dias seguidos</span>
+                    </div>
+                    <div class='streak-frase'>{frase_s}</div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
 
-            if meus_treinos.empty:
-                st.info("Nenhum protocolo ativo. Aguarde seu coach configurar seu treino.")
-            else:
-                treinos_disponiveis = meus_treinos['treino_nome'].unique()
-                selecao_treino = st.selectbox("Selecione o treino:", treinos_disponiveis)
-
-                # Resetar progresso se trocou de treino
-                if 'treino_ativo' not in st.session_state or st.session_state.treino_ativo != selecao_treino:
-                    st.session_state.treino_ativo = selecao_treino
-                    st.session_state.ex_index = 0
-                    st.session_state.cargas_sessao = {}
-                    st.session_state.treino_finalizado = False
-                    st.session_state.notas_sessao = ""
-
-                exercicios_df = meus_treinos[meus_treinos['treino_nome'] == selecao_treino].reset_index(drop=True)
-                total_ex = len(exercicios_df)
-
-                # Pré-carrega cargas anteriores na primeira vez
-                for idx, row in exercicios_df.iterrows():
-                    chave = f"carga_{idx}"
-                    if chave not in st.session_state.cargas_sessao:
-                        carga_ant = 0.0
-                        if not historico_geral.empty:
-                            filtro = historico_geral[
-                                (historico_geral['email_aluno'] == st.session_state.email) &
-                                (historico_geral['exercicio'] == row['exercicio'])
-                            ]
-                            if not filtro.empty:
-                                carga_ant = float(filtro.iloc[-1]['carga'])
-                        st.session_state.cargas_sessao[chave] = carga_ant
-
-                # ---- TELA DE CONCLUSÃO ----
-                if st.session_state.treino_finalizado:
-                    # Detecta recordes
-                    recordes = []
-                    for idx, row in exercicios_df.iterrows():
-                        chave = f"carga_{idx}"
-                        carga_hoje = st.session_state.cargas_sessao.get(chave, 0)
-                        carga_ant = 0.0
-                        if not historico_geral.empty:
-                            filtro = historico_geral[
-                                (historico_geral['email_aluno'] == st.session_state.email) &
-                                (historico_geral['exercicio'] == row['exercicio'])
-                            ]
-                            if not filtro.empty:
-                                carga_ant = float(filtro.iloc[-1]['carga'])
-                        if carga_hoje > carga_ant and carga_ant > 0:
-                            recordes.append({
-                                "exercicio": row['exercicio'],
-                                "antes": carga_ant,
-                                "depois": carga_hoje,
-                                "diff": carga_hoje - carga_ant
-                            })
-
-                    st.markdown("""
-                        <div class='conclusao-card'>
-                            <div class='conclusao-emoji'>🏆</div>
-                            <p class='conclusao-titulo'>Treino Concluído!</p>
-                            <p class='conclusao-sub'>Mais um passo para o seu melhor.</p>
+        # ---- MENSAGEM DO COACH ----
+        try:
+            df_u = ler_planilha("usuarios")
+            df_u['email'] = df_u['email'].astype(str).str.strip().str.lower()
+            linha_u = df_u[df_u['email'] == st.session_state.email]
+            if not linha_u.empty and 'mensagem_coach' in df_u.columns:
+                msg = str(linha_u.iloc[0].get('mensagem_coach', '')).strip()
+                if msg and msg.lower() not in ('nan', ''):
+                    st.markdown(f"""
+                        <div class='coach-msg'>
+                            <div class='coach-msg-label'>📣 Mensagem do Coach</div>
+                            <div class='coach-msg-texto'>{msg}</div>
                         </div>
                     """, unsafe_allow_html=True)
+        except:
+            pass
 
-                    if recordes:
-                        st.markdown(
-                            "<p style='color:#F9C03D; font-family:Inter; font-size:11px; letter-spacing:2px; text-align:center; text-transform:uppercase; margin-bottom:8px;'>🔥 Recordes Pessoais Quebrados</p>",
-                            unsafe_allow_html=True
-                        )
-                        badges_html = ""
-                        for r in recordes:
-                            badges_html += f"<div class='record-badge'>{r['exercicio']}<br><span>{r['antes']} → {r['depois']} kg (+{r['diff']:.1f})</span></div>"
-                        st.markdown(badges_html, unsafe_allow_html=True)
+        # ---- ABAS: TREINO | MINHA EVOLUÇÃO ----
+        col_t, col_e = st.columns(2)
+        with col_t:
+            is_treino = st.session_state.aba_ativa == 'treino'
+            st.markdown(f'<div class="{"btn-primary" if is_treino else ""}">', unsafe_allow_html=True)
+            if st.button("🏋️ Treino", key="tab_treino", use_container_width=True):
+                st.session_state.aba_ativa = 'treino'
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+        with col_e:
+            is_evolucao = st.session_state.aba_ativa == 'evolucao'
+            st.markdown(f'<div class="{"btn-primary" if is_evolucao else ""}">', unsafe_allow_html=True)
+            if st.button("📈 Minha Evolução", key="tab_evolucao", use_container_width=True):
+                st.session_state.aba_ativa = 'evolucao'
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
-                    st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("---")
 
-                    col_novo, col_hist = st.columns(2)
-                    with col_novo:
+        # ==========================================================
+        # ABA: MINHA EVOLUÇÃO
+        # ==========================================================
+        if st.session_state.aba_ativa == 'evolucao':
+            st.markdown(
+                "<h2 style='font-family:Space Grotesk;font-size:1.8rem;font-weight:900;line-height:1;margin-bottom:16px;'>"
+                "MINHA <span style='color:#F9C03D;'>EVOLUÇÃO</span></h2>",
+                unsafe_allow_html=True
+            )
+
+            meu_hist = historico_geral[historico_geral['email_aluno'] == st.session_state.email].copy() \
+                if not historico_geral.empty else pd.DataFrame()
+
+            if meu_hist.empty:
+                st.info("Nenhum treino registrado ainda. Complete seu primeiro treino para ver sua evolução aqui.")
+            else:
+                meu_hist['data'] = pd.to_datetime(meu_hist['data'], dayfirst=True)
+
+                # Recordes Pessoais
+                st.markdown(
+                    "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>🏆 Recordes Pessoais</p>",
+                    unsafe_allow_html=True
+                )
+                prs = meu_hist.groupby('exercicio').agg(
+                    carga_max=('carga', 'max'),
+                    ultima_data=('data', 'max')
+                ).reset_index().sort_values('carga_max', ascending=False)
+
+                pr_html = "<div style='background:rgba(28,27,27,0.9);border-radius:14px;overflow:hidden;margin-bottom:20px;'>"
+                for _, r in prs.iterrows():
+                    pr_html += f"""
+                        <div class='pr-row'>
+                            <div>
+                                <div class='pr-nome'>{r['exercicio']}</div>
+                                <div class='pr-data'>{r['ultima_data'].strftime('%d/%m/%Y')}</div>
+                            </div>
+                            <div class='pr-carga'>{r['carga_max']:.1f} kg</div>
+                        </div>"""
+                pr_html += "</div>"
+                st.markdown(pr_html, unsafe_allow_html=True)
+
+                # Gráfico de progressão
+                st.markdown(
+                    "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📊 Progressão de Carga</p>",
+                    unsafe_allow_html=True
+                )
+                ex_sel = st.selectbox("Selecione o exercício:", meu_hist['exercicio'].unique().tolist(), key="ev_ex")
+                df_prog = meu_hist[meu_hist['exercicio'] == ex_sel].sort_values('data')
+                df_prog['data_display'] = df_prog['data'].dt.strftime('%d/%m/%Y')
+                fig = px.line(df_prog, x='data_display', y='carga', markers=True)
+                fig.update_traces(line_color='#F9C03D', marker=dict(color='#F9C03D', size=8))
+                fig.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    font_color="white", margin=dict(l=0, r=0, t=10, b=0),
+                    xaxis_title="", yaxis_title="kg"
+                )
+                fig.update_xaxes(type='category', gridcolor='rgba(255,255,255,0.05)')
+                fig.update_yaxes(gridcolor='rgba(255,255,255,0.05)')
+                st.plotly_chart(fig, use_container_width=True)
+
+        # ==========================================================
+        # ABA: TREINO
+        # ==========================================================
+        else:
+            st.markdown(
+                "<h2 style='font-family:Space Grotesk;font-size:2rem;font-weight:900;line-height:1;margin-bottom:4px;'>"
+                "PROTOCOLO <span style='color:#F9C03D;'>DIÁRIO</span></h2>",
+                unsafe_allow_html=True
+            )
+
+            try:
+                df_treinos = ler_planilha("planilha_treinos")
+                df_treinos['email_aluno'] = df_treinos['email_aluno'].astype(str).str.strip().str.lower()
+                meus_treinos = df_treinos[df_treinos['email_aluno'] == st.session_state.email]
+
+                if meus_treinos.empty:
+                    st.info("Nenhum protocolo ativo. Aguarde seu coach configurar seu treino.")
+                else:
+                    treinos_disponiveis = meus_treinos['treino_nome'].unique()
+                    selecao_treino = st.selectbox("Selecione o treino:", treinos_disponiveis)
+
+                    if 'treino_ativo' not in st.session_state or st.session_state.treino_ativo != selecao_treino:
+                        st.session_state.treino_ativo = selecao_treino
+                        st.session_state.ex_index = 0
+                        st.session_state.cargas_sessao = {}
+                        st.session_state.treino_finalizado = False
+                        st.session_state.notas_sessao = ""
+
+                    exercicios_df = meus_treinos[meus_treinos['treino_nome'] == selecao_treino].reset_index(drop=True)
+                    total_ex = len(exercicios_df)
+
+                    # Pré-carrega cargas
+                    for idx, row in exercicios_df.iterrows():
+                        chave = f"carga_{idx}"
+                        if chave not in st.session_state.cargas_sessao:
+                            carga_ant = 0.0
+                            if not historico_geral.empty:
+                                filtro = historico_geral[
+                                    (historico_geral['email_aluno'] == st.session_state.email) &
+                                    (historico_geral['exercicio'] == row['exercicio'])
+                                ]
+                                if not filtro.empty:
+                                    carga_ant = float(filtro.iloc[-1]['carga'])
+                            st.session_state.cargas_sessao[chave] = carga_ant
+
+                    # ---- TELA DE CONCLUSÃO ----
+                    if st.session_state.treino_finalizado:
+                        vol_hoje = calcular_volume(exercicios_df, st.session_state.cargas_sessao)
+                        vol_ant = volume_anterior(historico_geral, st.session_state.email,
+                                                  selecao_treino, exercicios_df)
+                        diff_vol = vol_hoje - vol_ant
+                        diff_pct = (diff_vol / vol_ant * 100) if vol_ant > 0 else 0
+
+                        recordes = []
+                        for idx, row in exercicios_df.iterrows():
+                            carga_hoje = st.session_state.cargas_sessao.get(f"carga_{idx}", 0)
+                            carga_ant = 0.0
+                            if not historico_geral.empty:
+                                f2 = historico_geral[
+                                    (historico_geral['email_aluno'] == st.session_state.email) &
+                                    (historico_geral['exercicio'] == row['exercicio'])
+                                ]
+                                if not f2.empty:
+                                    carga_ant = float(f2['carga'].max())
+                            if carga_hoje > carga_ant and carga_ant > 0:
+                                recordes.append({
+                                    "exercicio": row['exercicio'],
+                                    "antes": carga_ant, "depois": carga_hoje,
+                                    "diff": carga_hoje - carga_ant
+                                })
+
+                        conclusao_emoji = "🏆" if recordes else "✅"
+                        conclusao_msg = "Recordes Quebrados!" if recordes else "Treino Concluído!"
+                        st.markdown(f"""
+                            <div class='conclusao-card'>
+                                <div style='font-size:3rem'>{conclusao_emoji}</div>
+                                <p class='conclusao-titulo'>{conclusao_msg}</p>
+                                <p class='conclusao-sub'>Mais um passo para o seu melhor.</p>
+                            </div>
+                        """, unsafe_allow_html=True)
+
+                        vol_class = "up" if diff_vol >= 0 else "down"
+                        vol_sinal = "+" if diff_vol >= 0 else ""
+                        st.markdown(f"""
+                            <div class='stat-row'>
+                                <div class='stat-box'>
+                                    <div class='stat-val'>{vol_hoje:,.0f}</div>
+                                    <div class='stat-lbl'>Volume Total (kg)</div>
+                                </div>
+                                <div class='stat-box'>
+                                    <div class='stat-val {vol_class}'>{vol_sinal}{diff_pct:.1f}%</div>
+                                    <div class='stat-lbl'>vs Treino Anterior</div>
+                                </div>
+                                <div class='stat-box'>
+                                    <div class='stat-val'>{total_ex}</div>
+                                    <div class='stat-lbl'>Exercícios</div>
+                                </div>
+                            </div>
+                        """, unsafe_allow_html=True)
+
+                        if recordes:
+                            st.markdown(
+                                "<p style='color:#F9C03D;font-family:Inter;font-size:11px;letter-spacing:2px;text-align:center;text-transform:uppercase;margin:16px 0 8px;'>🔥 PRs Quebrados Hoje</p>",
+                                unsafe_allow_html=True
+                            )
+                            badges = "".join([
+                                f"<div class='record-badge'>{r['exercicio']}<br>"
+                                f"<span>{r['antes']:.1f} → {r['depois']:.1f} kg (+{r['diff']:.1f})</span></div>"
+                                for r in recordes
+                            ])
+                            st.markdown(badges, unsafe_allow_html=True)
+
+                        st.markdown("<br>", unsafe_allow_html=True)
                         st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
                         if st.button("+ Novo Treino", use_container_width=True):
                             st.session_state.ex_index = 0
                             st.session_state.cargas_sessao = {}
                             st.session_state.treino_finalizado = False
                             st.session_state.notas_sessao = ""
+                            st.cache_data.clear()
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
 
-                # ---- FLUXO PASSO A PASSO ----
-                else:
-                    idx_atual = st.session_state.ex_index
-                    row = exercicios_df.iloc[idx_atual]
-                    chave = f"carga_{idx_atual}"
-                    carga_atual = st.session_state.cargas_sessao[chave]
-
-                    # Barra de progresso
-                    pct = int((idx_atual / total_ex) * 100)
-                    st.markdown(f"""
-                        <div class='progress-bar-bg'>
-                            <div class='progress-bar-fill' style='width:{pct}%;'></div>
-                        </div>
-                        <p class='progress-label'>Exercício {idx_atual + 1} de {total_ex}</p>
-                    """, unsafe_allow_html=True)
-
-                    # Card do exercício
-                    series = int(float(row['series'])) if pd.notnull(row['series']) else 0
-                    reps = int(float(row['reps'])) if pd.notnull(row['reps']) else 0
-
-                    st.markdown(f"""
-                        <div class='ex-card'>
-                            <p class='ex-label'>{selecao_treino}</p>
-                            <p class='ex-name'>{row['exercicio']}</p>
-                            <p class='ex-meta'>{series} SÉRIES × {reps} REPS</p>
-                            <p class='ex-pr'>Última carga: {carga_atual:.1f} kg</p>
-                        </div>
-                    """, unsafe_allow_html=True)
-
-                    # Vídeo de execução
-                    video_url = row.get('video_url', '')
-                    if pd.notnull(video_url) and str(video_url).startswith('http'):
-                        video_embed = video_url.split('?')[0].replace('/view', '/preview').replace('/edit', '/preview')
-                        with st.expander("🎬 Ver Execução"):
-                            st.components.v1.html(f'<iframe src="{video_embed}" width="100%" height="200" frameborder="0"></iframe>', height=210)
-
-                    # Display da carga
-                    st.markdown(f"""
-                        <div class='carga-display'>
-                            <p class='carga-valor'>{carga_atual:.1f}</p>
-                            <p class='carga-unit'>KG</p>
-                        </div>
-                    """, unsafe_allow_html=True)
-
-                    # Botões de ajuste de carga
-                    c1, c2, c3, c4 = st.columns(4)
-                    with c1:
-                        if st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True):
-                            st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 2.5)
-                            st.rerun()
-                    with c2:
-                        if st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True):
-                            st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 0.5)
-                            st.rerun()
-                    with c3:
-                        if st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True):
-                            st.session_state.cargas_sessao[chave] = carga_atual + 0.5
-                            st.rerun()
-                    with c4:
-                        if st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True):
-                            st.session_state.cargas_sessao[chave] = carga_atual + 2.5
-                            st.rerun()
-
-                    st.markdown("<br>", unsafe_allow_html=True)
-
-                    # Navegação
-                    eh_ultimo = (idx_atual == total_ex - 1)
-
-                    if eh_ultimo:
-                        # Notas antes de finalizar
-                        notas = st.text_area(
-                            "💬 Feedback do Atleta (opcional)",
-                            value=st.session_state.notas_sessao,
-                            placeholder="Como foi o treino? Alguma dor, cansaço, observação...",
-                            key="notas_final"
-                        )
-                        st.session_state.notas_sessao = notas
-
-                        col_ant, col_fin = st.columns(2)
-                        with col_ant:
-                            if st.button("← Anterior", key="btn_ant_final", use_container_width=True):
-                                st.session_state.ex_index -= 1
-                                st.rerun()
-                        with col_fin:
-                            st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-                            if st.button("FINALIZAR TREINO ✓", key="btn_finalizar", use_container_width=True):
-                                lista_registros = []
-                                for i, r in exercicios_df.iterrows():
-                                    lista_registros.append({
-                                        "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                                        "email_aluno": st.session_state.email,
-                                        "treino": selecao_treino,
-                                        "exercicio": r['exercicio'],
-                                        "carga": st.session_state.cargas_sessao.get(f"carga_{i}", 0),
-                                        "comentario": st.session_state.notas_sessao
-                                    })
-                                df_envio = pd.DataFrame(lista_registros)
-                                existente = ler_sem_cache("registros")
-                                df_final = pd.concat([existente, df_envio], ignore_index=True)
-                                conn.update(worksheet="registros", data=df_final)
-                                st.cache_data.clear()
-                                st.session_state.treino_finalizado = True
-                                st.rerun()
-                            st.markdown('</div>', unsafe_allow_html=True)
+                    # ---- FLUXO PASSO A PASSO ----
                     else:
-                        col_ant, col_prox = st.columns(2)
-                        with col_ant:
-                            # Primeiro exercício: botão desabilitado visualmente
-                            if idx_atual > 0:
-                                if st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True):
+                        idx_atual = st.session_state.ex_index
+                        row = exercicios_df.iloc[idx_atual]
+                        chave = f"carga_{idx_atual}"
+                        carga_atual = st.session_state.cargas_sessao[chave]
+
+                        pct = int((idx_atual / total_ex) * 100)
+                        st.markdown(f"""
+                            <div class='progress-bar-bg'>
+                                <div class='progress-bar-fill' style='width:{pct}%;'></div>
+                            </div>
+                            <p class='progress-label'>Exercício {idx_atual + 1} de {total_ex}</p>
+                        """, unsafe_allow_html=True)
+
+                        series = int(float(row['series'])) if pd.notnull(row.get('series')) else 0
+                        reps   = int(float(row['reps']))   if pd.notnull(row.get('reps'))   else 0
+
+                        st.markdown(f"""
+                            <div class='ex-card'>
+                                <p class='ex-label'>{selecao_treino}</p>
+                                <p class='ex-name'>{row['exercicio']}</p>
+                                <p class='ex-meta'>{series} SÉRIES × {reps} REPS</p>
+                                <p class='ex-pr'>Última carga: {carga_atual:.1f} kg</p>
+                            </div>
+                        """, unsafe_allow_html=True)
+
+                        video_url = row.get('video_url', '')
+                        if pd.notnull(video_url) and str(video_url).startswith('http'):
+                            embed = video_url.split('?')[0].replace('/view', '/preview').replace('/edit', '/preview')
+                            with st.expander("🎬 Ver Execução"):
+                                st.components.v1.html(f'<iframe src="{embed}" width="100%" height="200" frameborder="0"></iframe>', height=210)
+
+                        st.markdown(f"""
+                            <div class='carga-display'>
+                                <p class='carga-valor'>{carga_atual:.1f}</p>
+                                <p class='carga-unit'>KG</p>
+                            </div>
+                        """, unsafe_allow_html=True)
+
+                        c1, c2, c3, c4 = st.columns(4)
+                        with c1:
+                            if st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True):
+                                st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 2.5)
+                                st.rerun()
+                        with c2:
+                            if st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True):
+                                st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 0.5)
+                                st.rerun()
+                        with c3:
+                            if st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True):
+                                st.session_state.cargas_sessao[chave] = carga_atual + 0.5
+                                st.rerun()
+                        with c4:
+                            if st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True):
+                                st.session_state.cargas_sessao[chave] = carga_atual + 2.5
+                                st.rerun()
+
+                        st.markdown("<br>", unsafe_allow_html=True)
+
+                        eh_ultimo = (idx_atual == total_ex - 1)
+
+                        if eh_ultimo:
+                            notas = st.text_area(
+                                "💬 Feedback do Atleta (opcional)",
+                                value=st.session_state.notas_sessao,
+                                placeholder="Como foi o treino? Alguma dor, cansaço, observação...",
+                                key="notas_final"
+                            )
+                            st.session_state.notas_sessao = notas
+                            col_ant, col_fin = st.columns(2)
+                            with col_ant:
+                                if st.button("← Anterior", key="btn_ant_final", use_container_width=True):
                                     st.session_state.ex_index -= 1
                                     st.rerun()
-                            else:
-                                st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True, disabled=True)
-                        with col_prox:
-                            st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-                            if st.button("Próximo →", key=f"btn_prox_{idx_atual}", use_container_width=True):
-                                st.session_state.ex_index += 1
-                                st.rerun()
-                            st.markdown('</div>', unsafe_allow_html=True)
+                            with col_fin:
+                                st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+                                if st.button("FINALIZAR TREINO ✓", key="btn_finalizar", use_container_width=True):
+                                    lista = []
+                                    for i, r in exercicios_df.iterrows():
+                                        lista.append({
+                                            "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                                            "email_aluno": st.session_state.email,
+                                            "treino": selecao_treino,
+                                            "exercicio": r['exercicio'],
+                                            "carga": st.session_state.cargas_sessao.get(f"carga_{i}", 0),
+                                            "comentario": st.session_state.notas_sessao
+                                        })
+                                    df_envio = pd.DataFrame(lista)
+                                    existente = ler_sem_cache("registros")
+                                    conn.update(worksheet="registros", data=pd.concat([existente, df_envio], ignore_index=True))
+                                    st.cache_data.clear()
+                                    st.session_state.treino_finalizado = True
+                                    st.rerun()
+                                st.markdown('</div>', unsafe_allow_html=True)
+                        else:
+                            col_ant, col_prox = st.columns(2)
+                            with col_ant:
+                                if idx_atual > 0:
+                                    if st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True):
+                                        st.session_state.ex_index -= 1
+                                        st.rerun()
+                                else:
+                                    st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True, disabled=True)
+                            with col_prox:
+                                st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+                                if st.button("Próximo →", key=f"btn_prox_{idx_atual}", use_container_width=True):
+                                    st.session_state.ex_index += 1
+                                    st.rerun()
+                                st.markdown('</div>', unsafe_allow_html=True)
 
-        except Exception as e:
-            st.error(f"Erro: {e}")
+            except Exception as e:
+                st.error(f"Erro: {e}")
