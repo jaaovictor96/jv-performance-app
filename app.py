@@ -198,6 +198,26 @@ st.markdown(f"""
         font-size: 12px; margin-top: 3px; font-style: italic;
     }}
 
+    .coach-alert {{
+        background: linear-gradient(135deg, rgba(249,192,61,0.12), rgba(249,192,61,0.05));
+        border: 1px solid rgba(249,192,61,0.35); border-radius: 16px;
+        padding: 18px 20px; margin-bottom: 16px;
+        animation: fadeSlideUp 0.4s ease both, goldPulse 2.5s ease-in-out infinite;
+    }}
+    .coach-alert-header {{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }}
+    .coach-alert-label {{
+        color: #F9C03D; font-family: 'Inter', sans-serif;
+        font-size: 9px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    }}
+    .coach-alert-dot {{
+        width: 7px; height: 7px; border-radius: 50%; background: #F9C03D;
+        box-shadow: 0 0 6px rgba(249,192,61,0.8);
+        animation: goldPulse 1.2s ease-in-out infinite; flex-shrink: 0;
+    }}
+    .coach-alert-texto {{
+        color: #ddd; font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.6;
+    }}
+    
     .coach-msg {{
         background: rgba(22,21,21,0.95); border-left: 3px solid #F9C03D;
         border-radius: 0 14px 14px 0; padding: 14px 18px; margin-bottom: 16px;
@@ -384,7 +404,7 @@ st.markdown(f"""
 # TELA DE LOGIN
 # ==========================================================
 if not st.session_state.logado:
-    st.markdown("<h1 class='main-title'>TEAM <br> JV FERREIRA</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 class='main-title' style='color:#F9C03D;'>TEAM<br>JV FERREIRA</h1>", unsafe_allow_html=True)
     st.markdown("<p class='sub-title'>Aesthetic & Performance Lab<br>Consultoria Online</p>", unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns([1, 4, 1])
@@ -598,7 +618,7 @@ else:
             </div>
         """, unsafe_allow_html=True)
 
-        # ---- MENSAGEM DO COACH ----
+        # ---- ALERTA IN-APP: MENSAGEM DO COACH ----
         try:
             df_u = ler_planilha("usuarios")
             df_u['email'] = df_u['email'].astype(str).str.strip().str.lower()
@@ -606,12 +626,34 @@ else:
             if not linha_u.empty and 'mensagem_coach' in df_u.columns:
                 msg = str(linha_u.iloc[0].get('mensagem_coach', '')).strip()
                 if msg and msg.lower() not in ('nan', ''):
-                    st.markdown(f"""
-                        <div class='coach-msg'>
-                            <div class='coach-msg-label'>📣 Mensagem do Coach</div>
-                            <div class='coach-msg-texto'>{msg}</div>
-                        </div>
-                    """, unsafe_allow_html=True)
+                    # Chave única por conteúdo da mensagem — nova msg = novo alerta
+                    msg_key = f"msg_lida_{hash(msg)}"
+                    if msg_key not in st.session_state:
+                        st.session_state[msg_key] = False
+
+                    if not st.session_state[msg_key]:
+                        st.markdown(f"""
+                            <div class='coach-alert'>
+                                <div class='coach-alert-header'>
+                                    <span class='coach-alert-label'>📣 Mensagem do Coach</span>
+                                    <span class='coach-alert-dot'></span>
+                                </div>
+                                <div class='coach-alert-texto'>{msg}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        col_ok, _ = st.columns([1, 3])
+                        with col_ok:
+                            if st.button("✓ Entendido", key="dismiss_msg", use_container_width=True):
+                                st.session_state[msg_key] = True
+                                st.rerun()
+                    else:
+                        # Versão compacta após leitura
+                        st.markdown(f"""
+                            <div class='coach-msg'>
+                                <div class='coach-msg-label'>📣 Coach</div>
+                                <div class='coach-msg-texto'>{msg}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
         except:
             pass
 
@@ -674,6 +716,101 @@ else:
                         </div>"""
                 pr_html += "</div>"
                 st.markdown(pr_html, unsafe_allow_html=True)
+
+                # Calendário de treinos
+                st.markdown(
+                    "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📅 Calendário de Treinos</p>",
+                    unsafe_allow_html=True
+                )
+
+                # Navegação de mês
+                if 'cal_mes' not in st.session_state:
+                    st.session_state.cal_mes = datetime.now().replace(day=1)
+
+                col_prev, col_mes_label, col_next = st.columns([1, 3, 1])
+                with col_prev:
+                    if st.button("←", key="cal_prev", use_container_width=True):
+                        primeiro = st.session_state.cal_mes
+                        st.session_state.cal_mes = (primeiro - timedelta(days=1)).replace(day=1)
+                        st.rerun()
+                with col_mes_label:
+                    st.markdown(
+                        f"<p style='text-align:center;color:#ccc;font-family:Inter;font-size:13px;font-weight:600;letter-spacing:1px;margin:10px 0;'>"
+                        f"{st.session_state.cal_mes.strftime('%B %Y').upper()}</p>",
+                        unsafe_allow_html=True
+                    )
+                with col_next:
+                    hoje_dt = datetime.now().replace(day=1)
+                    if st.session_state.cal_mes < hoje_dt:
+                        if st.button("→", key="cal_next", use_container_width=True):
+                            ultimo_dia = (st.session_state.cal_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
+                            st.session_state.cal_mes = ultimo_dia
+                            st.rerun()
+
+                # Monta dados do mês
+                mes_ref = st.session_state.cal_mes
+                ano, mes = mes_ref.year, mes_ref.month
+                primeiro_dia_semana = mes_ref.weekday()  # 0=segunda
+                import calendar as cal_lib
+                total_dias = cal_lib.monthrange(ano, mes)[1]
+
+                # Volume por dia no mês
+                meu_hist['data_date'] = meu_hist['data'].dt.date
+                vol_por_dia = {}
+                for _, row_h in meu_hist.iterrows():
+                    d = row_h['data_date']
+                    if d.year == ano and d.month == mes:
+                        vol = float(row_h.get('carga', 0))
+                        vol_por_dia[d.day] = vol_por_dia.get(d.day, 0) + vol
+
+                max_vol = max(vol_por_dia.values()) if vol_por_dia else 1
+
+                # HTML do calendário
+                dias_semana = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM']
+                cal_html = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;padding:16px;margin-bottom:20px;border:1px solid rgba(255,255,255,0.05);'>"
+                # Header dias da semana
+                cal_html += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:8px;'>"
+                for d in dias_semana:
+                    cal_html += f"<div style='text-align:center;color:#333;font-family:Inter;font-size:9px;letter-spacing:1px;font-weight:600;'>{d}</div>"
+                cal_html += "</div>"
+                # Grid de dias
+                cal_html += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;'>"
+                # Células vazias antes do dia 1
+                for _ in range(primeiro_dia_semana):
+                    cal_html += "<div></div>"
+                hoje_date = datetime.now().date()
+                for dia in range(1, total_dias + 1):
+                    data_dia = datetime(ano, mes, dia).date()
+                    vol = vol_por_dia.get(dia, 0)
+                    is_hoje = data_dia == hoje_date
+                    if vol > 0:
+                        intensidade = vol / max_vol
+                        opacity = 0.3 + 0.7 * intensidade
+                        bg = f"rgba(249,192,61,{opacity:.2f})"
+                        cor_txt = "#0A0A0A" if intensidade > 0.5 else "#F9C03D"
+                        borda = "1px solid rgba(249,192,61,0.5)"
+                    else:
+                        bg = "rgba(255,255,255,0.03)"
+                        cor_txt = "#333"
+                        borda = "1px solid rgba(255,255,255,0.04)"
+                    anel = "box-shadow:0 0 0 2px #F9C03D;" if is_hoje else ""
+                    cal_html += (
+                        f"<div style='aspect-ratio:1;display:flex;align-items:center;justify-content:center;"
+                        f"border-radius:8px;background:{bg};border:{borda};{anel}"
+                        f"font-family:Space Grotesk;font-size:11px;font-weight:700;color:{cor_txt};'>{dia}</div>"
+                    )
+                cal_html += "</div>"
+                # Legenda
+                cal_html += """
+                    <div style='display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.04);'>
+                        <div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,0.3);'></div>
+                        <span style='color:#444;font-family:Inter;font-size:9px;letter-spacing:1px;'>Volume baixo</span>
+                        <div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,1);margin-left:8px;'></div>
+                        <span style='color:#444;font-family:Inter;font-size:9px;letter-spacing:1px;'>Volume alto</span>
+                    </div>
+                """
+                cal_html += "</div>"
+                st.markdown(cal_html, unsafe_allow_html=True)
 
                 # Gráfico de progressão
                 st.markdown(
