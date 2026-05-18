@@ -579,7 +579,7 @@ else:
                 em = str(row_u['email']).strip().lower()
                 nm = str(row_u.get('nome', em))
                 ult = ultimo_treino.get(em)
-                if ult:
+                if ult and not pd.isnull(ult):
                     dias_off = (hoje_ref - ult).days
                     if dias_off == 0:
                         cor, icone, label = "#4ade80", "🟢", "Treinou hoje"
