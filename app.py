@@ -570,7 +570,7 @@ else:
             if not df_coach.empty:
                 df_coach_tmp = df_coach.copy()
                 df_coach_tmp['email_aluno'] = df_coach_tmp['email_aluno'].astype(str).str.strip().str.lower()
-                df_coach_tmp['data_dt'] = pd.to_datetime(df_coach_tmp['data'], dayfirst=True).dt.date
+                df_coach_tmp['data_dt'] = pd.to_datetime(df_coach_tmp['data'], dayfirst=True, errors='coerce').dt.date
                 ultimo_treino = df_coach_tmp.groupby('email_aluno')['data_dt'].max().to_dict()
             else:
                 ultimo_treino = {}
