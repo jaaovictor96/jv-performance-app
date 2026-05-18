@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import plotly.express as px
 import time
 import base64
+import json
 import extra_streamlit_components as stx
 
 # --- 1. CONFIGURAÇÃO ---
@@ -29,6 +30,20 @@ if not st.session_state.logado and not st.session_state.saindo:
     if token:
         st.session_state.logado = True
         st.session_state.email = token
+
+# Restaura progresso do treino se session_state foi perdido (minimizar/background)
+if st.session_state.logado and not st.session_state.cargas_sessao:
+    try:
+        progresso_raw = cookie_manager.get(cookie="jv_progresso")
+        if progresso_raw:
+            progresso = json.loads(progresso_raw)
+            st.session_state.ex_index       = progresso.get('ex_index', 0)
+            st.session_state.treino_ativo   = progresso.get('treino_ativo', '')
+            st.session_state.notas_sessao   = progresso.get('notas_sessao', '')
+            cargas_raw = progresso.get('cargas_sessao', {})
+            st.session_state.cargas_sessao  = {k: float(v) for k, v in cargas_raw.items()}
+    except:
+        pass
 
 # --- 5. LOGO ---
 def get_base64_image(image_path):
@@ -876,6 +891,22 @@ else:
                                     carga_ant = float(filtro.iloc[-1]['carga'])
                             st.session_state.cargas_sessao[chave] = carga_ant
 
+                    # Persiste progresso em cookie — recupera ao minimizar/voltar
+                    try:
+                        progresso = {
+                            'ex_index':      st.session_state.ex_index,
+                            'treino_ativo':  selecao_treino,
+                            'notas_sessao':  st.session_state.notas_sessao,
+                            'cargas_sessao': st.session_state.cargas_sessao,
+                        }
+                        cookie_manager.set(
+                            cookie="jv_progresso",
+                            val=json.dumps(progresso),
+                            expires_at=datetime.now() + timedelta(hours=6)
+                        )
+                    except:
+                        pass
+
                     # ---- TELA DE CONCLUSÃO ----
                     if st.session_state.treino_finalizado:
                         vol_hoje = calcular_volume(exercicios_df, st.session_state.cargas_sessao)
@@ -1006,22 +1037,7 @@ else:
                             st.session_state[_input_key]          = novo
                             st.session_state.cargas_sessao[_chave] = novo
 
-                        # Botões de ajuste rápido
-                        c1, c2, c3, c4 = st.columns(4)
-                        with c1:
-                            st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True,
-                                      on_click=_ajustar, args=(-2.5, input_key, chave))
-                        with c2:
-                            st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True,
-                                      on_click=_ajustar, args=(-0.5, input_key, chave))
-                        with c3:
-                            st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True,
-                                      on_click=_ajustar, args=(0.5, input_key, chave))
-                        with c4:
-                            st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True,
-                                      on_click=_ajustar, args=(2.5, input_key, chave))
-
-                        # Campo de digitação centralizado
+                        # Campo de digitação centralizado (ANTES dos botões)
                         col_inp_l, col_inp, col_inp_r = st.columns([1, 3, 1])
                         with col_inp:
                             st.number_input(
@@ -1036,6 +1052,21 @@ else:
                                     {chave: st.session_state[input_key]}
                                 )
                             )
+
+                        # Botões de ajuste rápido
+                        c1, c2, c3, c4 = st.columns(4)
+                        with c1:
+                            st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True,
+                                      on_click=_ajustar, args=(-2.5, input_key, chave))
+                        with c2:
+                            st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True,
+                                      on_click=_ajustar, args=(-0.5, input_key, chave))
+                        with c3:
+                            st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True,
+                                      on_click=_ajustar, args=(0.5, input_key, chave))
+                        with c4:
+                            st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True,
+                                      on_click=_ajustar, args=(2.5, input_key, chave))
                         # Mantém cargas_sessao em sincronia com o que está no widget
                         st.session_state.cargas_sessao[chave] = st.session_state.get(input_key, carga_fonte)
 
