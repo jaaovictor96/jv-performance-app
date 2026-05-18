@@ -641,8 +641,9 @@ else:
             if not linha_u.empty and 'mensagem_coach' in df_u.columns:
                 msg = str(linha_u.iloc[0].get('mensagem_coach', '')).strip()
                 if msg and msg.lower() not in ('nan', ''):
-                    # Chave única por conteúdo da mensagem — nova msg = novo alerta
-                    msg_key = f"msg_lida_{hash(msg)}"
+                    # Chave estável baseada no conteúdo (hash() muda por execução)
+                    import hashlib
+                    msg_key = "msg_lida_" + hashlib.md5(msg.encode()).hexdigest()
                     if msg_key not in st.session_state:
                         st.session_state[msg_key] = False
 
