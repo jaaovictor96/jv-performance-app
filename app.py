@@ -987,49 +987,57 @@ else:
                             with st.expander("🎬 Ver Execução"):
                                 st.components.v1.html(f'<iframe src="{embed}" width="100%" height="200" frameborder="0"></iframe>', height=210)
 
-                        # --- INPUT EDITÁVEL + BOTÕES SEM RERUN ---
+                        # --- INPUT EDITÁVEL + BOTÕES DE AJUSTE ---
+                        # O number_input é a fonte da verdade — gerenciado pela própria key do Streamlit.
+                        # ── CARGA: input editável + botões de ajuste ──────────────
+                        # fonte de verdade = cargas_sessao[chave] (preenchido no pré-load)
                         input_key = f"input_carga_{idx_atual}"
 
-                        # Sincroniza input com session_state na primeira vez
+                        # Sincroniza input_key com cargas_sessao SEMPRE,
+                        # não apenas na primeira vez — evita zero ao navegar
+                        carga_fonte = st.session_state.cargas_sessao.get(chave, 0.0)
                         if input_key not in st.session_state:
-                            st.session_state[input_key] = carga_atual
+                            st.session_state[input_key] = float(carga_fonte)
 
-                        # Campo de digitação
+                        # Callback dos botões: atualiza as duas fontes atomicamente
+                        def _ajustar(delta, _input_key, _chave):
+                            atual = st.session_state.cargas_sessao.get(_chave, 0.0)
+                            novo  = max(0.0, round(atual + delta, 1))
+                            st.session_state[_input_key]          = novo
+                            st.session_state.cargas_sessao[_chave] = novo
+
+                        # Botões de ajuste rápido
+                        c1, c2, c3, c4 = st.columns(4)
+                        with c1:
+                            st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True,
+                                      on_click=_ajustar, args=(-2.5, input_key, chave))
+                        with c2:
+                            st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True,
+                                      on_click=_ajustar, args=(-0.5, input_key, chave))
+                        with c3:
+                            st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True,
+                                      on_click=_ajustar, args=(0.5, input_key, chave))
+                        with c4:
+                            st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True,
+                                      on_click=_ajustar, args=(2.5, input_key, chave))
+
+                        # Campo de digitação centralizado
                         col_inp_l, col_inp, col_inp_r = st.columns([1, 3, 1])
                         with col_inp:
-                            nova_carga = st.number_input(
+                            st.number_input(
                                 "Carga (kg)",
                                 min_value=0.0,
                                 max_value=999.0,
                                 step=0.5,
-                                value=st.session_state[input_key],
                                 format="%.1f",
                                 key=input_key,
-                                label_visibility="collapsed"
+                                label_visibility="collapsed",
+                                on_change=lambda: st.session_state.cargas_sessao.update(
+                                    {chave: st.session_state[input_key]}
+                                )
                             )
-                        # Atualiza session sem rerun — o number_input já re-renderiza
-                        st.session_state.cargas_sessao[chave] = nova_carga
-                        carga_atual = nova_carga
-
-                        # Linha: − 2.5 | − 0.5 | + 0.5 | + 2.5  (sem rerun individual)
-                        c1, c2, c3, c4 = st.columns(4)
-                        def _ajustar(delta, _chave, _input_key):
-                            novo = max(0.0, st.session_state.cargas_sessao[_chave] + delta)
-                            st.session_state.cargas_sessao[_chave] = novo
-                            st.session_state[_input_key] = novo
-
-                        with c1:
-                            st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True,
-                                      on_click=_ajustar, args=(-2.5, chave, input_key))
-                        with c2:
-                            st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True,
-                                      on_click=_ajustar, args=(-0.5, chave, input_key))
-                        with c3:
-                            st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True,
-                                      on_click=_ajustar, args=(0.5, chave, input_key))
-                        with c4:
-                            st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True,
-                                      on_click=_ajustar, args=(2.5, chave, input_key))
+                        # Mantém cargas_sessao em sincronia com o que está no widget
+                        st.session_state.cargas_sessao[chave] = st.session_state.get(input_key, carga_fonte)
 
                         st.markdown("<br>", unsafe_allow_html=True)
 
