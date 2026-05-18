@@ -551,103 +551,309 @@ else:
     # DASHBOARD DO COACH
     # ==========================================================
     if ativar_dashboard:
-        st.markdown("<h2 style='font-family:Space Grotesk;color:#F9C03D;'>ANÁLISE DE PERFORMANCE</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='font-family:Space Grotesk;color:#F9C03D;margin-bottom:16px;'>PAINEL DO COACH</h2>", unsafe_allow_html=True)
 
         df_usuarios = ler_sem_cache("usuarios")
-        df_coach = ler_sem_cache("registros")
+        df_coach    = ler_sem_cache("registros")
 
-        if not df_usuarios.empty:
-            df_usuarios['email'] = df_usuarios['email'].astype(str).str.strip().str.lower()
-
-            # ── VISÃO GERAL: último treino + alerta de inatividade ──────────
-            st.markdown(
-                "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;"
-                "text-transform:uppercase;margin-bottom:8px;'>👥 Status dos Alunos</p>",
-                unsafe_allow_html=True
-            )
+        if df_usuarios.empty:
+            st.info("Nenhum aluno cadastrado.")
+        else:
+            df_usuarios["email"] = df_usuarios["email"].astype(str).str.strip().str.lower()
             hoje_ref = datetime.now().date()
-            status_html = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;overflow:hidden;margin-bottom:24px;border:1px solid rgba(255,255,255,0.05);'>"
+
+            # STATUS GERAL
             if not df_coach.empty:
                 df_coach_tmp = df_coach.copy()
-                df_coach_tmp['email_aluno'] = df_coach_tmp['email_aluno'].astype(str).str.strip().str.lower()
-                df_coach_tmp['data_dt'] = pd.to_datetime(df_coach_tmp['data'], dayfirst=True, errors='coerce').dt.date
-                ultimo_treino = df_coach_tmp.groupby('email_aluno')['data_dt'].max().to_dict()
+                df_coach_tmp["email_aluno"] = df_coach_tmp["email_aluno"].astype(str).str.strip().str.lower()
+                df_coach_tmp["data_dt"] = pd.to_datetime(df_coach_tmp["data"], dayfirst=True, errors="coerce").dt.date
+                ultimo_treino = df_coach_tmp.groupby("email_aluno")["data_dt"].max().to_dict()
             else:
                 ultimo_treino = {}
 
-            for _, row_u in df_usuarios.dropna(subset=['nome']).iterrows():
-                em = str(row_u['email']).strip().lower()
-                nm = str(row_u.get('nome', em))
+            st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>ALUNOS</p>", unsafe_allow_html=True)
+            sh = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;overflow:hidden;margin-bottom:20px;border:1px solid rgba(255,255,255,0.05);'>"
+            for _, row_u in df_usuarios.dropna(subset=["nome"]).iterrows():
+                em  = str(row_u["email"]).strip().lower()
+                nm  = str(row_u.get("nome", em))
                 ult = ultimo_treino.get(em)
                 if ult and not pd.isnull(ult):
                     dias_off = (hoje_ref - ult).days
                     if dias_off == 0:
                         cor, icone, label = "#4ade80", "🟢", "Treinou hoje"
                     elif dias_off <= 2:
-                        cor, icone, label = "#F9C03D", "🟡", f"Há {dias_off} dia{'s' if dias_off>1 else ''}"
+                        cor, icone, label = "#F9C03D", "🟡", f"Ha {dias_off} dia{'s' if dias_off>1 else ''}"
                     else:
-                        cor, icone, label = "#f87171", "🔴", f"Há {dias_off} dias — ATENÇÃO"
+                        cor, icone, label = "#f87171", "🔴", f"Ha {dias_off} dias - ATENCAO"
                 else:
                     cor, icone, label = "#555", "⚫", "Nunca treinou"
-                status_html += (
+                sh += (
                     f"<div style='display:flex;justify-content:space-between;align-items:center;"
                     f"padding:12px 18px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
                     f"<div style='font-family:Inter;font-size:13px;font-weight:500;color:#ccc;'>{icone} {nm}</div>"
-                    f"<div style='font-family:Inter;font-size:11px;color:{cor};'>{label}</div>"
-                    f"</div>"
+                    f"<div style='font-family:Inter;font-size:11px;color:{cor};'>{label}</div></div>"
                 )
-            status_html += "</div>"
-            st.markdown(status_html, unsafe_allow_html=True)
+            sh += "</div>"
+            st.markdown(sh, unsafe_allow_html=True)
 
+            nome_sel = st.selectbox("Selecione o Aluno:", df_usuarios["nome"].dropna().unique().tolist(), key="coach_aluno_sel")
+            email_vinculado = df_usuarios[df_usuarios["nome"] == nome_sel]["email"].iloc[0]
             st.divider()
-            nome_sel = st.selectbox("Selecione o Aluno para detalhes:", df_usuarios['nome'].dropna().unique().tolist())
-            email_vinculado = df_usuarios[df_usuarios['nome'] == nome_sel]['email'].iloc[0]
 
-            if not df_coach.empty:
-                df_coach['email_aluno'] = df_coach['email_aluno'].astype(str).str.strip().str.lower()
-                df_aluno = df_coach[df_coach['email_aluno'] == email_vinculado].copy()
+            # ABAS
+            if "coach_aba" not in st.session_state:
+                st.session_state.coach_aba = "graficos"
 
-                if not df_aluno.empty:
-                    df_aluno['data'] = pd.to_datetime(df_aluno['data'], dayfirst=True)
-                    exercicio_sel = st.selectbox("Exercício:", df_aluno['exercicio'].unique())
-                    df_prog = df_aluno[df_aluno['exercicio'] == exercicio_sel].sort_values('data')
-                    df_prog['data_display'] = df_prog['data'].dt.strftime('%d/%m/%Y')
-                    fig = px.line(df_prog, x='data_display', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
-                    fig.update_traces(line_color='#F9C03D')
-                    fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
-                    fig.update_xaxes(type='category', title="Data do Treino")
-                    st.plotly_chart(fig, use_container_width=True)
+            ca1, ca2, ca3, ca4 = st.columns(4)
+            for key, label, col in [("graficos","📊 Graficos",ca1),("checkins","📋 Check-ins",ca2),
+                                     ("treinos","🏋 Treinos",ca3),("mensagens","📣 Mensagens",ca4)]:
+                with col:
+                    ativo = st.session_state.coach_aba == key
+                    if ativo:
+                        st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+                    if st.button(label, key=f"coach_tab_{key}", use_container_width=True):
+                        st.session_state.coach_aba = key
+                        st.rerun()
+                    if ativo:
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown("---")
+
+            # ABA GRAFICOS
+            if st.session_state.coach_aba == "graficos":
+                if df_coach.empty:
+                    st.info(f"{nome_sel} ainda nao registrou treinos.")
                 else:
-                    st.info(f"{nome_sel} ainda não registrou treinos.")
-
-            st.divider()
-            st.markdown("### 📋 Histórico de Check-ins")
-            try:
-                df_ci = ler_sem_cache("checkins")
-                if not df_ci.empty:
-                    df_ci['email'] = df_ci['email'].astype(str).str.strip().str.lower()
-                    df_ci['data'] = pd.to_datetime(df_ci['data'], dayfirst=True)
-                    df_f = df_ci[df_ci['email'] == email_vinculado].sort_values('data')
-                    if not df_f.empty:
-                        st.dataframe(df_f.sort_values('data', ascending=False),
-                            column_config={
-                                "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                                "email": None,
-                                "peso": st.column_config.NumberColumn("Peso (kg)", format="%.1f"),
-                                "feedback": "Relato do Aluno"
-                            }, hide_index=True, use_container_width=True)
-                        df_f['data_display'] = df_f['data'].dt.strftime('%d/%m/%Y')
-                        fig_p = px.line(df_f, x='data_display', y='peso', markers=True, title=f"Evolução de Peso — {nome_sel}")
-                        fig_p.update_traces(line_color='#F9C03D')
-                        fig_p.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
-                        fig_p.update_xaxes(type='category', title="Data do Check-in")
-                        st.plotly_chart(fig_p, use_container_width=True)
+                    df_coach["email_aluno"] = df_coach["email_aluno"].astype(str).str.strip().str.lower()
+                    df_aluno = df_coach[df_coach["email_aluno"] == email_vinculado].copy()
+                    if df_aluno.empty:
+                        st.info(f"{nome_sel} ainda nao registrou treinos.")
                     else:
-                        st.info(f"Nenhum check-in para {nome_sel}.")
-                else:
-                    st.info("Aba de check-ins está vazia.")
-            except Exception as e:
-                st.error(f"Erro check-ins: {e}")
+                        df_aluno["data"] = pd.to_datetime(df_aluno["data"], dayfirst=True, errors="coerce")
+                        df_aluno = df_aluno.dropna(subset=["data"])
+                        periodo = st.selectbox("Periodo:", ["Ultimas 4 semanas","Ultimo mes","Ultimos 3 meses","Tudo"], key="coach_periodo")
+                        hoje_dt = pd.Timestamp(hoje_ref)
+                        if periodo == "Ultimas 4 semanas":   corte = hoje_dt - pd.Timedelta(weeks=4)
+                        elif periodo == "Ultimo mes":         corte = hoje_dt - pd.Timedelta(days=30)
+                        elif periodo == "Ultimos 3 meses":    corte = hoje_dt - pd.Timedelta(days=90)
+                        else:                                 corte = pd.Timestamp("2000-01-01")
+                        df_p = df_aluno[df_aluno["data"] >= corte]
+
+                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>PROGRESSAO DE CARGA</p>", unsafe_allow_html=True)
+                        exercicio_sel = st.selectbox("Exercicio:", df_p["exercicio"].unique(), key="coach_ex_sel")
+                        df_prog = df_p[df_p["exercicio"] == exercicio_sel].sort_values("data")
+                        df_prog["data_display"] = df_prog["data"].dt.strftime("%d/%m/%Y")
+                        fig = px.line(df_prog, x="data_display", y="carga", markers=True)
+                        fig.update_traces(line_color="#F9C03D", marker=dict(color="#F9C03D", size=8))
+                        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                          font_color="white", margin=dict(l=0,r=0,t=10,b=0),
+                                          xaxis_title="", yaxis_title="kg")
+                        fig.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.05)")
+                        fig.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin:16px 0 8px;'>VOLUME TOTAL POR SESSAO</p>", unsafe_allow_html=True)
+                        try:
+                            df_vol = df_p.copy()
+                            df_vol["data_display"] = df_vol["data"].dt.strftime("%d/%m/%Y")
+                            vol_dia = df_vol.groupby("data_display")["carga"].sum().reset_index()
+                            vol_dia.columns = ["data", "volume"]
+                            fig_v = px.bar(vol_dia, x="data", y="volume")
+                            fig_v.update_traces(marker_color="#F9C03D", marker_opacity=0.8)
+                            fig_v.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                                font_color="white", margin=dict(l=0,r=0,t=10,b=0),
+                                                xaxis_title="", yaxis_title="kg total")
+                            fig_v.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.05)")
+                            fig_v.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
+                            st.plotly_chart(fig_v, use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"Erro no grafico de volume: {e}")
+
+            # ABA CHECKINS
+            elif st.session_state.coach_aba == "checkins":
+                try:
+                    df_ci = ler_sem_cache("checkins")
+                    if df_ci.empty:
+                        st.info("Nenhum check-in registrado.")
+                    else:
+                        df_ci["email"] = df_ci["email"].astype(str).str.strip().str.lower()
+                        df_ci["data"]  = pd.to_datetime(df_ci["data"], dayfirst=True, errors="coerce")
+                        df_f = df_ci[df_ci["email"] == email_vinculado].sort_values("data", ascending=False)
+                        if df_f.empty:
+                            st.info(f"Nenhum check-in para {nome_sel}.")
+                        else:
+                            palavras_neg = ["dor","cansado","cansaco","mal","ruim","fraco","enjoo","lesao","dificil"]
+                            alertas = []
+                            if len(df_f) >= 2:
+                                delta_peso = float(df_f.iloc[0]["peso"]) - float(df_f.iloc[1]["peso"])
+                                if abs(delta_peso) >= 2:
+                                    sinal = "📉" if delta_peso < 0 else "📈"
+                                    alertas.append(f"{sinal} Variacao de {delta_peso:+.1f}kg no ultimo check-in")
+                            for _, ci_row in df_f.iterrows():
+                                fb = str(ci_row.get("feedback","")).lower()
+                                if any(p in fb for p in palavras_neg):
+                                    dt_str = ci_row["data"].strftime("%d/%m/%Y") if pd.notnull(ci_row["data"]) else "?"
+                                    alertas.append(f"⚠️ Feedback negativo em {dt_str}")
+                                    break
+                            if pd.notnull(df_f.iloc[0]["data"]):
+                                dias_sem = (hoje_ref - df_f.iloc[0]["data"].date()).days
+                                if dias_sem > 15:
+                                    alertas.append(f"🕐 Sem check-in ha {dias_sem} dias")
+                            if alertas:
+                                ah = "<div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:14px;padding:14px 18px;margin-bottom:16px;'>"
+                                ah += "<p style='color:#f87171;font-family:Inter;font-size:9px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;font-weight:700;'>ALERTAS</p>"
+                                for a in alertas:
+                                    ah += f"<p style='color:#f87171;font-family:Inter;font-size:12px;margin:4px 0;'>{a}</p>"
+                                ah += "</div>"
+                                st.markdown(ah, unsafe_allow_html=True)
+                            st.dataframe(
+                                df_f.rename(columns={"data":"Data","peso":"Peso (kg)","feedback":"Relato","email":"Email"}),
+                                column_config={
+                                    "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                                    "Email": None,
+                                    "Peso (kg)": st.column_config.NumberColumn("Peso (kg)", format="%.1f"),
+                                    "Relato": "Relato do Aluno"
+                                }, hide_index=True, use_container_width=True
+                            )
+                            df_f2 = df_f.sort_values("data")
+                            df_f2["data_display"] = df_f2["data"].dt.strftime("%d/%m/%Y")
+                            fig_p = px.line(df_f2, x="data_display", y="peso", markers=True)
+                            fig_p.update_traces(line_color="#F9C03D", marker=dict(color="#F9C03D", size=8))
+                            fig_p.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                                font_color="white", margin=dict(l=0,r=0,t=10,b=0),
+                                                xaxis_title="", yaxis_title="kg")
+                            fig_p.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.05)")
+                            fig_p.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
+                            st.plotly_chart(fig_p, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Erro check-ins: {e}")
+
+            # ABA TREINOS
+            elif st.session_state.coach_aba == "treinos":
+                try:
+                    df_tr = ler_sem_cache("planilha_treinos")
+                    df_tr["email_aluno"] = df_tr["email_aluno"].astype(str).str.strip().str.lower()
+                    df_aluno_tr = df_tr[df_tr["email_aluno"] == email_vinculado].copy()
+
+                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;'>PROTOCOLOS ATIVOS</p>", unsafe_allow_html=True)
+
+                    if not df_aluno_tr.empty:
+                        ficha_sel = st.selectbox("Ficha:", df_aluno_tr["treino_nome"].unique().tolist(), key="coach_ficha_sel")
+                        df_ficha = df_aluno_tr[df_aluno_tr["treino_nome"] == ficha_sel].reset_index(drop=True)
+                        exercicios_editados = []
+                        for i, row_ex in df_ficha.iterrows():
+                            with st.expander(f"{i+1}. {row_ex['exercicio']}", expanded=False):
+                                ce1, ce2, ce3 = st.columns(3)
+                                with ce1:
+                                    novo_nome = st.text_input("Exercicio", value=str(row_ex["exercicio"]), key=f"ex_nome_{i}")
+                                with ce2:
+                                    nova_serie = st.number_input("Series", min_value=1, max_value=20,
+                                        value=int(float(row_ex["series"])) if pd.notnull(row_ex.get("series")) else 3, key=f"ex_serie_{i}")
+                                with ce3:
+                                    nova_rep = st.number_input("Reps", min_value=1, max_value=100,
+                                        value=int(float(row_ex["reps"])) if pd.notnull(row_ex.get("reps")) else 10, key=f"ex_rep_{i}")
+                                novo_video = st.text_input("URL do Video", value=str(row_ex.get("video_url","")) if pd.notnull(row_ex.get("video_url")) else "", key=f"ex_video_{i}")
+                                if st.button("Remover", key=f"del_ex_{i}", use_container_width=True):
+                                    df_full = ler_sem_cache("planilha_treinos")
+                                    df_full["email_aluno"] = df_full["email_aluno"].astype(str).str.strip().str.lower()
+                                    mask_del = ((df_full["email_aluno"] == email_vinculado) &
+                                                (df_full["treino_nome"] == ficha_sel) &
+                                                (df_full["exercicio"] == row_ex["exercicio"]))
+                                    conn.update(worksheet="planilha_treinos", data=df_full[~mask_del].reset_index(drop=True))
+                                    st.cache_data.clear()
+                                    st.toast("Exercicio removido.", icon="🗑️")
+                                    st.rerun()
+                                exercicios_editados.append({"email_aluno": email_vinculado, "treino_nome": ficha_sel,
+                                    "exercicio": novo_nome, "series": nova_serie, "reps": nova_rep, "video_url": novo_video})
+                        st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+                        if st.button("Salvar Alteracoes da Ficha", key="salvar_ficha", use_container_width=True):
+                            df_full = ler_sem_cache("planilha_treinos")
+                            df_full["email_aluno"] = df_full["email_aluno"].astype(str).str.strip().str.lower()
+                            mask_f = (df_full["email_aluno"] == email_vinculado) & (df_full["treino_nome"] == ficha_sel)
+                            df_full = pd.concat([df_full[~mask_f], pd.DataFrame(exercicios_editados)], ignore_index=True)
+                            conn.update(worksheet="planilha_treinos", data=df_full)
+                            st.cache_data.clear()
+                            st.toast("Ficha salva!", icon="✅")
+                            st.rerun()
+                        st.markdown("</div>", unsafe_allow_html=True)
+                    else:
+                        st.info("Nenhum protocolo cadastrado para este aluno.")
+
+                    st.markdown("---")
+                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;'>ADICIONAR EXERCICIO</p>", unsafe_allow_html=True)
+                    with st.form("form_add_ex", clear_on_submit=True):
+                        cn1, cn2 = st.columns(2)
+                        with cn1:
+                            nome_ficha_nova = st.text_input("Nome da Ficha", placeholder="Ex: Treino A")
+                        with cn2:
+                            nome_ex_novo = st.text_input("Exercicio", placeholder="Ex: Supino Reto")
+                        cn3, cn4 = st.columns(2)
+                        with cn3:
+                            series_novo = st.number_input("Series", min_value=1, max_value=20, value=4)
+                        with cn4:
+                            reps_novo = st.number_input("Reps", min_value=1, max_value=100, value=12)
+                        video_novo = st.text_input("URL do Video (opcional)")
+                        if st.form_submit_button("ADICIONAR"):
+                            if nome_ficha_nova and nome_ex_novo:
+                                df_full = ler_sem_cache("planilha_treinos")
+                                novo_ex = pd.DataFrame([{"email_aluno": email_vinculado, "treino_nome": nome_ficha_nova,
+                                    "exercicio": nome_ex_novo, "series": series_novo, "reps": reps_novo, "video_url": video_novo}])
+                                conn.update(worksheet="planilha_treinos", data=pd.concat([df_full, novo_ex], ignore_index=True))
+                                st.cache_data.clear()
+                                st.toast(f"{nome_ex_novo} adicionado!", icon="💪")
+                                st.rerun()
+                            else:
+                                st.warning("Preencha o nome da ficha e do exercicio.")
+                except Exception as e:
+                    st.error(f"Erro treinos: {e}")
+
+            # ABA MENSAGENS
+            elif st.session_state.coach_aba == "mensagens":
+                try:
+                    df_u_msg = ler_sem_cache("usuarios")
+                    df_u_msg["email"] = df_u_msg["email"].astype(str).str.strip().str.lower()
+                    linha_msg = df_u_msg[df_u_msg["email"] == email_vinculado]
+                    msg_atual = ""
+                    if not linha_msg.empty and "mensagem_coach" in df_u_msg.columns:
+                        msg_atual = str(linha_msg.iloc[0].get("mensagem_coach","")).strip()
+                        if msg_atual.lower() == "nan":
+                            msg_atual = ""
+                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;'>MENSAGEM ATIVA</p>", unsafe_allow_html=True)
+                    if msg_atual:
+                        st.markdown(f"<div class='coach-msg'><div class='coach-msg-label'>Mensagem atual para {nome_sel}</div><div class='coach-msg-texto'>{msg_atual}</div></div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown("<p style='color:#444;font-family:Inter;font-size:12px;'>Nenhuma mensagem ativa para este aluno.</p>", unsafe_allow_html=True)
+                    nova_msg = st.text_area("Nova mensagem:", placeholder=f"Escreva para {nome_sel}...", height=100, key="nova_msg_coach")
+                    cm1, cm2 = st.columns(2)
+                    with cm1:
+                        st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+                        if st.button("Enviar Mensagem", key="btn_enviar_msg", use_container_width=True):
+                            if nova_msg.strip():
+                                df_u_upd = ler_sem_cache("usuarios")
+                                df_u_upd["email"] = df_u_upd["email"].astype(str).str.strip().str.lower()
+                                if "mensagem_coach" not in df_u_upd.columns:
+                                    df_u_upd["mensagem_coach"] = ""
+                                df_u_upd.loc[df_u_upd["email"] == email_vinculado, "mensagem_coach"] = nova_msg.strip()
+                                conn.update(worksheet="usuarios", data=df_u_upd)
+                                st.cache_data.clear()
+                                st.toast(f"Mensagem enviada para {nome_sel}!", icon="✅")
+                                st.rerun()
+                            else:
+                                st.warning("Digite uma mensagem antes de enviar.")
+                        st.markdown("</div>", unsafe_allow_html=True)
+                    with cm2:
+                        if st.button("Limpar Mensagem", key="btn_limpar_msg", use_container_width=True):
+                            df_u_upd = ler_sem_cache("usuarios")
+                            df_u_upd["email"] = df_u_upd["email"].astype(str).str.strip().str.lower()
+                            if "mensagem_coach" in df_u_upd.columns:
+                                df_u_upd.loc[df_u_upd["email"] == email_vinculado, "mensagem_coach"] = ""
+                                conn.update(worksheet="usuarios", data=df_u_upd)
+                                st.cache_data.clear()
+                                st.toast("Mensagem removida.", icon="🗑️")
+                                st.rerun()
+                except Exception as e:
+                    st.error(f"Erro mensagens: {e}")
+
 
     # ==========================================================
     # ÁREA DO ATLETA
