@@ -631,7 +631,11 @@ else:
                     else:
                         df_aluno["data"] = pd.to_datetime(df_aluno["data"], dayfirst=True, errors="coerce")
                         df_aluno = df_aluno.dropna(subset=["data"])
-                        periodo = st.selectbox("Periodo:", ["Ultimas 4 semanas","Ultimo mes","Ultimos 3 meses","Tudo"], key="coach_periodo")
+
+                        # Filtros: período + treino
+                        col_per, col_tr = st.columns(2)
+                        with col_per:
+                            periodo = st.selectbox("Periodo:", ["Ultimas 4 semanas","Ultimo mes","Ultimos 3 meses","Tudo"], key="coach_periodo")
                         hoje_dt = pd.Timestamp(hoje_ref)
                         if periodo == "Ultimas 4 semanas":   corte = hoje_dt - pd.Timedelta(weeks=4)
                         elif periodo == "Ultimo mes":         corte = hoje_dt - pd.Timedelta(days=30)
@@ -639,35 +643,30 @@ else:
                         else:                                 corte = pd.Timestamp("2000-01-01")
                         df_p = df_aluno[df_aluno["data"] >= corte]
 
-                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>PROGRESSAO DE CARGA</p>", unsafe_allow_html=True)
-                        exercicio_sel = st.selectbox("Exercicio:", df_p["exercicio"].unique(), key="coach_ex_sel")
-                        df_prog = df_p[df_p["exercicio"] == exercicio_sel].sort_values("data")
-                        df_prog["data_display"] = df_prog["data"].dt.strftime("%d/%m/%Y")
-                        fig = px.line(df_prog, x="data_display", y="carga", markers=True)
-                        fig.update_traces(line_color="#F9C03D", marker=dict(color="#F9C03D", size=8))
-                        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                                          font_color="white", margin=dict(l=0,r=0,t=10,b=0),
-                                          xaxis_title="", yaxis_title="kg")
-                        fig.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.05)")
-                        fig.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
-                        st.plotly_chart(fig, use_container_width=True)
+                        # Filtro por treino — só aparece se houver coluna "treino"
+                        if "treino" in df_p.columns:
+                            treinos_disp = df_p["treino"].dropna().unique().tolist()
+                            with col_tr:
+                                treino_sel = st.selectbox("Treino:", ["Todos"] + treinos_disp, key="coach_treino_sel")
+                            if treino_sel != "Todos":
+                                df_p = df_p[df_p["treino"] == treino_sel]
 
-                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin:16px 0 8px;'>VOLUME TOTAL POR SESSAO</p>", unsafe_allow_html=True)
-                        try:
-                            df_vol = df_p.copy()
-                            df_vol["data_display"] = df_vol["data"].dt.strftime("%d/%m/%Y")
-                            vol_dia = df_vol.groupby("data_display")["carga"].sum().reset_index()
-                            vol_dia.columns = ["data", "volume"]
-                            fig_v = px.bar(vol_dia, x="data", y="volume")
-                            fig_v.update_traces(marker_color="#F9C03D", marker_opacity=0.8)
-                            fig_v.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                                                font_color="white", margin=dict(l=0,r=0,t=10,b=0),
-                                                xaxis_title="", yaxis_title="kg total")
-                            fig_v.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.05)")
-                            fig_v.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
-                            st.plotly_chart(fig_v, use_container_width=True)
-                        except Exception as e:
-                            st.warning(f"Erro no grafico de volume: {e}")
+                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>PROGRESSAO DE CARGA</p>", unsafe_allow_html=True)
+                        exercicios_disp = df_p["exercicio"].dropna().unique().tolist()
+                        if not exercicios_disp:
+                            st.info("Nenhum exercicio encontrado para os filtros selecionados.")
+                        else:
+                            exercicio_sel = st.selectbox("Exercicio:", exercicios_disp, key="coach_ex_sel")
+                            df_prog = df_p[df_p["exercicio"] == exercicio_sel].sort_values("data")
+                            df_prog["data_display"] = df_prog["data"].dt.strftime("%d/%m/%Y")
+                            fig = px.line(df_prog, x="data_display", y="carga", markers=True)
+                            fig.update_traces(line_color="#F9C03D", marker=dict(color="#F9C03D", size=8))
+                            fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                              font_color="white", margin=dict(l=0,r=0,t=10,b=0),
+                                              xaxis_title="", yaxis_title="kg")
+                            fig.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.05)")
+                            fig.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
+                            st.plotly_chart(fig, use_container_width=True)
 
             # ABA CHECKINS
             elif st.session_state.coach_aba == "checkins":
