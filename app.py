@@ -65,8 +65,14 @@ conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 def ler_planilha(worksheet: str):
     return conn.read(worksheet=worksheet)
 
-def ler_sem_cache(worksheet: str):
-    return conn.read(worksheet=worksheet, ttl=0)
+def ler_sem_cache(worksheet: str, tentativas: int = 3):
+    for i in range(tentativas):
+        try:
+            return conn.read(worksheet=worksheet, ttl=0)
+        except Exception:
+            if i < tentativas - 1:
+                time.sleep(1.5)
+    return pd.DataFrame()
 
 # --- 7. FUNÇÕES DE ENGAJAMENTO ---
 
@@ -552,17 +558,54 @@ else:
 
         if not df_usuarios.empty:
             df_usuarios['email'] = df_usuarios['email'].astype(str).str.strip().str.lower()
-            nome_sel = st.selectbox("Selecione o Aluno:", df_usuarios['nome'].dropna().unique().tolist())
+
+            # ── VISÃO GERAL: último treino + alerta de inatividade ──────────
+            st.markdown(
+                "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;"
+                "text-transform:uppercase;margin-bottom:8px;'>👥 Status dos Alunos</p>",
+                unsafe_allow_html=True
+            )
+            hoje_ref = datetime.now().date()
+            status_html = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;overflow:hidden;margin-bottom:24px;border:1px solid rgba(255,255,255,0.05);'>"
+            if not df_coach.empty:
+                df_coach_tmp = df_coach.copy()
+                df_coach_tmp['email_aluno'] = df_coach_tmp['email_aluno'].astype(str).str.strip().str.lower()
+                df_coach_tmp['data_dt'] = pd.to_datetime(df_coach_tmp['data'], dayfirst=True).dt.date
+                ultimo_treino = df_coach_tmp.groupby('email_aluno')['data_dt'].max().to_dict()
+            else:
+                ultimo_treino = {}
+
+            for _, row_u in df_usuarios.dropna(subset=['nome']).iterrows():
+                em = str(row_u['email']).strip().lower()
+                nm = str(row_u.get('nome', em))
+                ult = ultimo_treino.get(em)
+                if ult:
+                    dias_off = (hoje_ref - ult).days
+                    if dias_off == 0:
+                        cor, icone, label = "#4ade80", "🟢", "Treinou hoje"
+                    elif dias_off <= 2:
+                        cor, icone, label = "#F9C03D", "🟡", f"Há {dias_off} dia{'s' if dias_off>1 else ''}"
+                    else:
+                        cor, icone, label = "#f87171", "🔴", f"Há {dias_off} dias — ATENÇÃO"
+                else:
+                    cor, icone, label = "#555", "⚫", "Nunca treinou"
+                status_html += (
+                    f"<div style='display:flex;justify-content:space-between;align-items:center;"
+                    f"padding:12px 18px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
+                    f"<div style='font-family:Inter;font-size:13px;font-weight:500;color:#ccc;'>{icone} {nm}</div>"
+                    f"<div style='font-family:Inter;font-size:11px;color:{cor};'>{label}</div>"
+                    f"</div>"
+                )
+            status_html += "</div>"
+            st.markdown(status_html, unsafe_allow_html=True)
+
+            st.divider()
+            nome_sel = st.selectbox("Selecione o Aluno para detalhes:", df_usuarios['nome'].dropna().unique().tolist())
             email_vinculado = df_usuarios[df_usuarios['nome'] == nome_sel]['email'].iloc[0]
 
             if not df_coach.empty:
                 df_coach['email_aluno'] = df_coach['email_aluno'].astype(str).str.strip().str.lower()
                 df_aluno = df_coach[df_coach['email_aluno'] == email_vinculado].copy()
-
-                with st.expander("🔍 Debug (remova após confirmar)"):
-                    st.write(f"Email buscado: `{email_vinculado}`")
-                    st.write(f"Emails em registros: {df_coach['email_aluno'].unique().tolist()}")
-                    st.write(f"Linhas encontradas: {len(df_aluno)}")
 
                 if not df_aluno.empty:
                     df_aluno['data'] = pd.to_datetime(df_aluno['data'], dayfirst=True)
@@ -1073,7 +1116,16 @@ else:
 
                         st.markdown("<br>", unsafe_allow_html=True)
 
+                        # Botão pular — discreto, só aparece se não for o último
                         eh_ultimo = (idx_atual == total_ex - 1)
+                        if not eh_ultimo:
+                            col_pular_l, col_pular, col_pular_r = st.columns([2, 2, 2])
+                            with col_pular:
+                                if st.button("↷ Pular exercício", key=f"pular_{idx_atual}", use_container_width=True):
+                                    st.session_state.cargas_sessao[chave] = 0.0
+                                    st.session_state.ex_index += 1
+                                    st.toast("Exercício pulado", icon="↷")
+                                    st.rerun()
 
                         if eh_ultimo:
                             notas = st.text_area(
@@ -1121,6 +1173,7 @@ else:
                                 st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
                                 if st.button("Próximo →", key=f"btn_prox_{idx_atual}", use_container_width=True):
                                     st.session_state.ex_index += 1
+                                    st.toast("✓ Carga registrada!", icon="💪")
                                     st.rerun()
                                 st.markdown('</div>', unsafe_allow_html=True)
 
