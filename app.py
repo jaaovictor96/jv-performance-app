@@ -987,30 +987,49 @@ else:
                             with st.expander("🎬 Ver Execução"):
                                 st.components.v1.html(f'<iframe src="{embed}" width="100%" height="200" frameborder="0"></iframe>', height=210)
 
-                        st.markdown(f"""
-                            <div class='carga-display'>
-                                <p class='carga-valor'>{carga_atual:.1f}</p>
-                                <p class='carga-unit'>KG</p>
-                            </div>
-                        """, unsafe_allow_html=True)
+                        # --- INPUT EDITÁVEL + BOTÕES SEM RERUN ---
+                        input_key = f"input_carga_{idx_atual}"
 
+                        # Sincroniza input com session_state na primeira vez
+                        if input_key not in st.session_state:
+                            st.session_state[input_key] = carga_atual
+
+                        # Campo de digitação
+                        col_inp_l, col_inp, col_inp_r = st.columns([1, 3, 1])
+                        with col_inp:
+                            nova_carga = st.number_input(
+                                "Carga (kg)",
+                                min_value=0.0,
+                                max_value=999.0,
+                                step=0.5,
+                                value=st.session_state[input_key],
+                                format="%.1f",
+                                key=input_key,
+                                label_visibility="collapsed"
+                            )
+                        # Atualiza session sem rerun — o number_input já re-renderiza
+                        st.session_state.cargas_sessao[chave] = nova_carga
+                        carga_atual = nova_carga
+
+                        # Linha: − 2.5 | − 0.5 | + 0.5 | + 2.5  (sem rerun individual)
                         c1, c2, c3, c4 = st.columns(4)
+                        def _ajustar(delta, _chave, _input_key):
+                            novo = max(0.0, st.session_state.cargas_sessao[_chave] + delta)
+                            st.session_state.cargas_sessao[_chave] = novo
+                            st.session_state[_input_key] = novo
+
                         with c1:
-                            if st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True):
-                                st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 2.5)
-                                st.rerun()
+                            st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True,
+                                      on_click=_ajustar, args=(-2.5, chave, input_key))
                         with c2:
-                            if st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True):
-                                st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 0.5)
-                                st.rerun()
+                            st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True,
+                                      on_click=_ajustar, args=(-0.5, chave, input_key))
                         with c3:
-                            if st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True):
-                                st.session_state.cargas_sessao[chave] = carga_atual + 0.5
-                                st.rerun()
+                            st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True,
+                                      on_click=_ajustar, args=(0.5, chave, input_key))
                         with c4:
-                            if st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True):
-                                st.session_state.cargas_sessao[chave] = carga_atual + 2.5
-                                st.rerun()
+                            st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True,
+                                      on_click=_ajustar, args=(2.5, chave, input_key))
 
                         st.markdown("<br>", unsafe_allow_html=True)
 
