@@ -80,6 +80,13 @@ def ler_sem_cache(worksheet: str, tentativas: int = 3):
 
 # --- 7. FUNÇÕES DE ENGAJAMENTO ---
 
+def parsear_data(series: pd.Series) -> pd.Series:
+    """Parseia datas em formato misto (dd/mm/YYYY ou dd/mm/YYYY HH:MM) de forma robusta."""
+    try:
+        return pd.to_datetime(series, dayfirst=True, format='mixed', errors='coerce')
+    except Exception:
+        return pd.to_datetime(series, dayfirst=True, errors='coerce')
+
 def calcular_streak(historico: pd.DataFrame, email: str) -> int:
     if historico.empty:
         return 0
@@ -87,16 +94,23 @@ def calcular_streak(historico: pd.DataFrame, email: str) -> int:
     if df.empty:
         return 0
     try:
-        df['data_dt'] = pd.to_datetime(df['data'], dayfirst=True, errors='coerce').dt.date
+        df['data_dt'] = parsear_data(df['data']).dt.date
+        df = df.dropna(subset=['data_dt'])
         dias = sorted(df['data_dt'].unique(), reverse=True)
+        if not dias:
+            return 0
         hoje = datetime.now().date()
-        ontem = hoje - timedelta(days=1)
-        if dias[0] not in (hoje, ontem):
+        # Considera streak ativo se treinou hoje OU ontem (não penaliza quem
+        # treinou à noite e abre o app no dia seguinte antes de treinar)
+        if (hoje - dias[0]).days > 1:
             return 0
         streak = 1
         for i in range(1, len(dias)):
-            if (dias[i - 1] - dias[i]).days == 1:
+            diff = (dias[i - 1] - dias[i]).days
+            if diff == 1:
                 streak += 1
+            elif diff == 0:
+                continue  # mesmo dia, ignora duplicata
             else:
                 break
         return streak
@@ -135,7 +149,7 @@ def volume_anterior(historico: pd.DataFrame, email: str, treino: str,
     if df.empty:
         return 0.0
     try:
-        df['data_dt'] = pd.to_datetime(df['data'], dayfirst=True, errors='coerce')
+        df['data_dt'] = parsear_data(df['data'])
         ultima_data = df['data_dt'].max()
         df_ult = df[df['data_dt'] == ultima_data]
         total = 0.0
@@ -592,7 +606,7 @@ else:
             if not df_coach.empty:
                 df_coach_tmp = df_coach.copy()
                 df_coach_tmp["email_aluno"] = df_coach_tmp["email_aluno"].astype(str).str.strip().str.lower()
-                df_coach_tmp["data_dt"] = pd.to_datetime(df_coach_tmp["data"], dayfirst=True, errors="coerce").dt.date
+                df_coach_tmp["data_dt"] = parsear_data(df_coach_tmp["data"]).dt.date
                 df_coach_tmp = df_coach_tmp.dropna(subset=["data_dt"])
                 ultimo_treino = df_coach_tmp.groupby("email_aluno")["data_dt"].max().to_dict()
             else:
@@ -656,7 +670,7 @@ else:
                     if df_aluno.empty:
                         st.info(f"{nome_sel} ainda nao registrou treinos.")
                     else:
-                        df_aluno["data"] = pd.to_datetime(df_aluno["data"], dayfirst=True, errors="coerce")
+                        df_aluno["data"] = parsear_data(df_aluno["data"])
                         df_aluno = df_aluno.dropna(subset=["data"])
 
                         # Filtros: período + treino
@@ -703,7 +717,7 @@ else:
                         st.info("Nenhum check-in registrado.")
                     else:
                         df_ci["email"] = df_ci["email"].astype(str).str.strip().str.lower()
-                        df_ci["data"]  = pd.to_datetime(df_ci["data"], dayfirst=True, errors="coerce")
+                        df_ci["data"]  = parsear_data(df_ci["data"])
                         df_f = df_ci[df_ci["email"] == email_vinculado].sort_values("data", ascending=False)
                         if df_f.empty:
                             st.info(f"Nenhum check-in para {nome_sel}.")
@@ -977,6 +991,7 @@ else:
         try:
             historico_geral = ler_planilha("registros")
             historico_geral['email_aluno'] = historico_geral['email_aluno'].astype(str).str.strip().str.lower()
+            historico_geral['data'] = parsear_data(historico_geral['data'])
         except:
             historico_geral = pd.DataFrame()
 
@@ -1071,7 +1086,7 @@ else:
             if meu_hist.empty:
                 st.info("Nenhum treino registrado ainda. Complete seu primeiro treino para ver sua evolução aqui.")
             else:
-                meu_hist['data'] = pd.to_datetime(meu_hist['data'], dayfirst=True, errors='coerce')
+                meu_hist['data'] = parsear_data(meu_hist['data'])
 
                 # Recordes Pessoais
                 st.markdown(
