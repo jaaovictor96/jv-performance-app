@@ -87,7 +87,7 @@ def calcular_streak(historico: pd.DataFrame, email: str) -> int:
     if df.empty:
         return 0
     try:
-        df['data_dt'] = pd.to_datetime(df['data'], dayfirst=True).dt.date
+        df['data_dt'] = pd.to_datetime(df['data'], dayfirst=True, errors='coerce').dt.date
         dias = sorted(df['data_dt'].unique(), reverse=True)
         hoje = datetime.now().date()
         ontem = hoje - timedelta(days=1)
@@ -135,7 +135,7 @@ def volume_anterior(historico: pd.DataFrame, email: str, treino: str,
     if df.empty:
         return 0.0
     try:
-        df['data_dt'] = pd.to_datetime(df['data'], dayfirst=True)
+        df['data_dt'] = pd.to_datetime(df['data'], dayfirst=True, errors='coerce')
         ultima_data = df['data_dt'].max()
         df_ult = df[df['data_dt'] == ultima_data]
         total = 0.0
@@ -1070,7 +1070,7 @@ else:
             if meu_hist.empty:
                 st.info("Nenhum treino registrado ainda. Complete seu primeiro treino para ver sua evolução aqui.")
             else:
-                meu_hist['data'] = pd.to_datetime(meu_hist['data'], dayfirst=True)
+                meu_hist['data'] = pd.to_datetime(meu_hist['data'], dayfirst=True, errors='coerce')
 
                 # Recordes Pessoais
                 st.markdown(
