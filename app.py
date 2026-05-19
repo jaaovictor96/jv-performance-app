@@ -31,17 +31,21 @@ if not st.session_state.logado and not st.session_state.saindo:
         st.session_state.logado = True
         st.session_state.email = token
 
-# Restaura progresso do treino se session_state foi perdido (minimizar/background)
+# Restaura progresso do treino via query_params (nativo Streamlit, 100% confiável)
 if st.session_state.logado and not st.session_state.cargas_sessao:
     try:
-        progresso_raw = cookie_manager.get(cookie="jv_progresso")
+        progresso_raw = st.query_params.get("prog")
         if progresso_raw:
             progresso = json.loads(progresso_raw)
-            st.session_state.ex_index       = progresso.get('ex_index', 0)
-            st.session_state.treino_ativo   = progresso.get('treino_ativo', '')
-            st.session_state.notas_sessao   = progresso.get('notas_sessao', '')
+            st.session_state.ex_index      = progresso.get('ex_index', 0)
+            st.session_state.treino_ativo  = progresso.get('treino_ativo', '')
+            st.session_state.notas_sessao  = progresso.get('notas_sessao', '')
             cargas_raw = progresso.get('cargas_sessao', {})
-            st.session_state.cargas_sessao  = {k: float(v) for k, v in cargas_raw.items()}
+            st.session_state.cargas_sessao = {k: float(v) for k, v in cargas_raw.items()}
+            # Restaura também os inputs de carga para cada exercício
+            for k, v in st.session_state.cargas_sessao.items():
+                idx = k.replace('carga_', '')
+                st.session_state[f'input_carga_{idx}'] = v
     except:
         pass
 
@@ -522,23 +526,45 @@ else:
                 st.sidebar.error("As senhas não coincidem.")
 
     with st.sidebar.expander("📝 Check-in Quinzenal"):
-        with st.form("form_checkin", clear_on_submit=True):
-            st.markdown("##### Relatório de Evolução")
-            peso_atual = st.number_input("Peso Atual (kg)", min_value=30.0, step=0.1)
-            feedback = st.text_area("Como se sentiu (Fome, Sono, Treino)?")
-            if st.form_submit_button("ENVIAR PARA O COACH"):
-                try:
+        if st.session_state.get("checkin_enviado"):
+            ci_data = st.session_state.get("checkin_dados", {})
+            st.sidebar.markdown(
+                f"<div style='background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);"
+                f"border-radius:12px;padding:12px 14px;'>"
+                f"<p style='color:#4ade80;font-family:Inter;font-size:9px;letter-spacing:2px;"
+                f"text-transform:uppercase;font-weight:700;margin-bottom:6px;'>✅ Check-in Recebido</p>"
+                f"<p style='color:#aaa;font-family:Inter;font-size:12px;margin:2px 0;'>"
+                f"📅 {ci_data.get('data','')}</p>"
+                f"<p style='color:#aaa;font-family:Inter;font-size:12px;margin:2px 0;'>"
+                f"⚖️ {ci_data.get('peso','')} kg</p>"
+                f"<p style='color:#555;font-family:Inter;font-size:11px;margin-top:6px;'>"
+                f"Seu coach foi notificado!</p></div>",
+                unsafe_allow_html=True
+            )
+            if st.sidebar.button("Novo Check-in", key="novo_checkin"):
+                st.session_state.checkin_enviado = False
+                st.rerun()
+        else:
+            with st.form("form_checkin", clear_on_submit=True):
+                st.markdown("##### Relatório de Evolução")
+                peso_atual = st.number_input("Peso Atual (kg)", min_value=30.0, step=0.1)
+                feedback = st.text_area("Como se sentiu (Fome, Sono, Treino)?")
+                if st.form_submit_button("ENVIAR PARA O COACH"):
                     try:
-                        df_ci = ler_sem_cache("checkins")
-                    except:
-                        df_ci = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
-                    novo = pd.DataFrame([{"data": datetime.now().strftime("%d/%m/%Y"),
-                                          "email": st.session_state.email,
-                                          "peso": peso_atual, "feedback": feedback}])
-                    conn.update(worksheet="checkins", data=pd.concat([df_ci, novo], ignore_index=True))
-                    st.sidebar.success("Check-in enviado! 🚀")
-                except Exception as e:
-                    st.sidebar.error(f"Erro: {e}")
+                        try:
+                            df_ci = ler_sem_cache("checkins")
+                        except:
+                            df_ci = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
+                        data_envio = datetime.now().strftime("%d/%m/%Y")
+                        novo = pd.DataFrame([{"data": data_envio,
+                                              "email": st.session_state.email,
+                                              "peso": peso_atual, "feedback": feedback}])
+                        conn.update(worksheet="checkins", data=pd.concat([df_ci, novo], ignore_index=True))
+                        st.session_state.checkin_enviado = True
+                        st.session_state.checkin_dados = {"data": data_envio, "peso": peso_atual}
+                        st.rerun()
+                    except Exception as e:
+                        st.sidebar.error(f"Erro: {e}")
 
     # ---- PAINEL DO COACH ----
     ativar_dashboard = False
@@ -732,12 +758,42 @@ else:
                 try:
                     df_tr = ler_sem_cache("planilha_treinos")
                     df_tr["email_aluno"] = df_tr["email_aluno"].astype(str).str.strip().str.lower()
-                    df_aluno_tr = df_tr[df_tr["email_aluno"] == email_vinculado].copy()
+                    # Garante coluna status
+                    if "status" not in df_tr.columns:
+                        df_tr["status"] = "ativo"
+                    df_tr["status"] = df_tr["status"].fillna("ativo")
+                    df_aluno_tr = df_tr[
+                        (df_tr["email_aluno"] == email_vinculado) &
+                        (df_tr["status"] == "ativo")
+                    ].copy()
+                    df_aluno_arq = df_tr[
+                        (df_tr["email_aluno"] == email_vinculado) &
+                        (df_tr["status"] == "arquivada")
+                    ].copy()
 
                     st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;'>PROTOCOLOS ATIVOS</p>", unsafe_allow_html=True)
 
                     if not df_aluno_tr.empty:
-                        ficha_sel = st.selectbox("Ficha:", df_aluno_tr["treino_nome"].unique().tolist(), key="coach_ficha_sel")
+                        fichas_ativas = df_aluno_tr["treino_nome"].unique().tolist()
+                        col_fsel, col_farq = st.columns([3, 1])
+                        with col_fsel:
+                            ficha_sel = st.selectbox("Ficha:", fichas_ativas, key="coach_ficha_sel")
+                        with col_farq:
+                            st.markdown("<div style='margin-top:28px;'>", unsafe_allow_html=True)
+                            if st.button("📦 Arquivar", key="arquivar_ficha", use_container_width=True):
+                                df_full = ler_sem_cache("planilha_treinos")
+                                df_full["email_aluno"] = df_full["email_aluno"].astype(str).str.strip().str.lower()
+                                if "status" not in df_full.columns:
+                                    df_full["status"] = "ativo"
+                                mask_arq = ((df_full["email_aluno"] == email_vinculado) &
+                                            (df_full["treino_nome"] == ficha_sel))
+                                df_full.loc[mask_arq, "status"] = "arquivada"
+                                conn.update(worksheet="planilha_treinos", data=df_full)
+                                st.cache_data.clear()
+                                st.toast(f"Ficha '{ficha_sel}' arquivada.", icon="📦")
+                                st.rerun()
+                            st.markdown("</div>", unsafe_allow_html=True)
+
                         df_ficha = df_aluno_tr[df_aluno_tr["treino_nome"] == ficha_sel].reset_index(drop=True)
                         exercicios_editados = []
                         for i, row_ex in df_ficha.iterrows():
@@ -763,7 +819,8 @@ else:
                                     st.toast("Exercicio removido.", icon="🗑️")
                                     st.rerun()
                                 exercicios_editados.append({"email_aluno": email_vinculado, "treino_nome": ficha_sel,
-                                    "exercicio": novo_nome, "series": nova_serie, "reps": nova_rep, "video_url": novo_video})
+                                    "exercicio": novo_nome, "series": nova_serie, "reps": nova_rep,
+                                    "video_url": novo_video, "status": "ativo"})
                         st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
                         if st.button("Salvar Alteracoes da Ficha", key="salvar_ficha", use_container_width=True):
                             df_full = ler_sem_cache("planilha_treinos")
@@ -776,7 +833,29 @@ else:
                             st.rerun()
                         st.markdown("</div>", unsafe_allow_html=True)
                     else:
-                        st.info("Nenhum protocolo cadastrado para este aluno.")
+                        st.info("Nenhum protocolo ativo para este aluno.")
+
+                    # Fichas arquivadas
+                    if not df_aluno_arq.empty:
+                        st.markdown("---")
+                        st.markdown("<p style='color:#555;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📦 Fichas Arquivadas</p>", unsafe_allow_html=True)
+                        for ficha_arq in df_aluno_arq["treino_nome"].unique():
+                            col_fa, col_rest = st.columns([3, 1])
+                            with col_fa:
+                                st.markdown(f"<p style='color:#444;font-family:Inter;font-size:13px;margin:8px 0;'>{ficha_arq}</p>", unsafe_allow_html=True)
+                            with col_rest:
+                                if st.button("↩ Restaurar", key=f"rest_{ficha_arq}", use_container_width=True):
+                                    df_full = ler_sem_cache("planilha_treinos")
+                                    df_full["email_aluno"] = df_full["email_aluno"].astype(str).str.strip().str.lower()
+                                    if "status" not in df_full.columns:
+                                        df_full["status"] = "ativo"
+                                    mask_rest = ((df_full["email_aluno"] == email_vinculado) &
+                                                 (df_full["treino_nome"] == ficha_arq))
+                                    df_full.loc[mask_rest, "status"] = "ativo"
+                                    conn.update(worksheet="planilha_treinos", data=df_full)
+                                    st.cache_data.clear()
+                                    st.toast(f"Ficha '{ficha_arq}' restaurada!", icon="✅")
+                                    st.rerun()
 
                     st.markdown("---")
                     st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;'>ADICIONAR EXERCICIO</p>", unsafe_allow_html=True)
@@ -796,13 +875,48 @@ else:
                             if nome_ficha_nova and nome_ex_novo:
                                 df_full = ler_sem_cache("planilha_treinos")
                                 novo_ex = pd.DataFrame([{"email_aluno": email_vinculado, "treino_nome": nome_ficha_nova,
-                                    "exercicio": nome_ex_novo, "series": series_novo, "reps": reps_novo, "video_url": video_novo}])
+                                    "exercicio": nome_ex_novo, "series": series_novo, "reps": reps_novo,
+                                    "video_url": video_novo, "status": "ativo"}])
                                 conn.update(worksheet="planilha_treinos", data=pd.concat([df_full, novo_ex], ignore_index=True))
                                 st.cache_data.clear()
                                 st.toast(f"{nome_ex_novo} adicionado!", icon="💪")
                                 st.rerun()
                             else:
                                 st.warning("Preencha o nome da ficha e do exercicio.")
+
+                    # Cadastro de novo aluno
+                    st.markdown("---")
+                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;'>➕ CADASTRAR NOVO ALUNO</p>", unsafe_allow_html=True)
+                    with st.form("form_novo_aluno", clear_on_submit=True):
+                        cna1, cna2 = st.columns(2)
+                        with cna1:
+                            novo_nome_aluno = st.text_input("Nome Completo", placeholder="Ex: João Silva")
+                        with cna2:
+                            novo_email_aluno = st.text_input("E-mail", placeholder="joao@email.com")
+                        cna3, cna4 = st.columns(2)
+                        with cna3:
+                            nova_senha_aluno = st.text_input("Senha inicial", placeholder="Min. 4 caracteres")
+                        with cna4:
+                            nova_msg_aluno = st.text_input("Mensagem de boas-vindas (opcional)")
+                        if st.form_submit_button("CADASTRAR ALUNO"):
+                            if novo_nome_aluno and novo_email_aluno and len(nova_senha_aluno) >= 4:
+                                df_u_cad = ler_sem_cache("usuarios")
+                                df_u_cad["email"] = df_u_cad["email"].astype(str).str.strip().str.lower()
+                                if novo_email_aluno.strip().lower() in df_u_cad["email"].values:
+                                    st.warning("Este e-mail já está cadastrado.")
+                                else:
+                                    novo_aluno = pd.DataFrame([{
+                                        "nome": novo_nome_aluno.strip(),
+                                        "email": novo_email_aluno.strip().lower(),
+                                        "senha": nova_senha_aluno.strip(),
+                                        "mensagem_coach": nova_msg_aluno.strip()
+                                    }])
+                                    conn.update(worksheet="usuarios", data=pd.concat([df_u_cad, novo_aluno], ignore_index=True))
+                                    st.cache_data.clear()
+                                    st.toast(f"{novo_nome_aluno} cadastrado com sucesso!", icon="👤")
+                                    st.rerun()
+                            else:
+                                st.warning("Preencha nome, e-mail e senha (min. 4 caracteres).")
                 except Exception as e:
                     st.error(f"Erro treinos: {e}")
 
@@ -1108,7 +1222,13 @@ else:
             try:
                 df_treinos = ler_sem_cache("planilha_treinos")
                 df_treinos['email_aluno'] = df_treinos['email_aluno'].astype(str).str.strip().str.lower()
-                meus_treinos = df_treinos[df_treinos['email_aluno'] == st.session_state.email]
+                if 'status' not in df_treinos.columns:
+                    df_treinos['status'] = 'ativo'
+                df_treinos['status'] = df_treinos['status'].fillna('ativo')
+                meus_treinos = df_treinos[
+                    (df_treinos['email_aluno'] == st.session_state.email) &
+                    (df_treinos['status'] == 'ativo')
+                ]
 
                 if meus_treinos.empty:
                     st.info("Nenhum protocolo ativo. Aguarde seu coach configurar seu treino.")
@@ -1140,7 +1260,7 @@ else:
                                     carga_ant = float(filtro.iloc[-1]['carga'])
                             st.session_state.cargas_sessao[chave] = carga_ant
 
-                    # Persiste progresso em cookie — recupera ao minimizar/voltar
+                    # Persiste progresso via query_params — sobrevive a minimizar/recarregar
                     try:
                         progresso = {
                             'ex_index':      st.session_state.ex_index,
@@ -1148,11 +1268,7 @@ else:
                             'notas_sessao':  st.session_state.notas_sessao,
                             'cargas_sessao': st.session_state.cargas_sessao,
                         }
-                        cookie_manager.set(
-                            cookie="jv_progresso",
-                            val=json.dumps(progresso),
-                            expires_at=datetime.now() + timedelta(hours=6)
-                        )
+                        st.query_params["prog"] = json.dumps(progresso)
                     except:
                         pass
 
@@ -1231,6 +1347,10 @@ else:
                             st.session_state.treino_finalizado = False
                             st.session_state.notas_sessao = ""
                             st.cache_data.clear()
+                            try:
+                                st.query_params.clear()
+                            except:
+                                pass
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1363,6 +1483,11 @@ else:
                                     conn.update(worksheet="registros", data=pd.concat([existente, df_envio], ignore_index=True))
                                     st.cache_data.clear()
                                     st.session_state.treino_finalizado = True
+                                    # Limpa o progresso salvo pois treino foi concluído
+                                    try:
+                                        st.query_params.clear()
+                                    except:
+                                        pass
                                     st.rerun()
                                 st.markdown('</div>', unsafe_allow_html=True)
                         else:
