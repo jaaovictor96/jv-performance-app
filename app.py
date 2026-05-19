@@ -1148,14 +1148,6 @@ else:
                             if st.button("✓ Entendido", key="dismiss_msg", use_container_width=True):
                                 st.session_state[msg_key] = True
                                 st.rerun()
-                    else:
-                        # Versão compacta após leitura
-                        st.markdown(f"""
-                            <div class='coach-msg'>
-                                <div class='coach-msg-label'>📣 Coach</div>
-                                <div class='coach-msg-texto'>{msg}</div>
-                            </div>
-                        """, unsafe_allow_html=True)
         except:
             pass
 
