@@ -737,7 +737,7 @@ else:
                                     break
                             if pd.notnull(df_f.iloc[0]["data"]):
                                 dias_sem = (hoje_ref - df_f.iloc[0]["data"].date()).days
-                                if dias_sem > 15:
+                                if dias_sem > 7:
                                     alertas.append(f"🕐 Sem check-in ha {dias_sem} dias")
                             if alertas:
                                 ah = "<div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:14px;padding:14px 18px;margin-bottom:16px;'>"
@@ -995,6 +995,34 @@ else:
         except:
             historico_geral = pd.DataFrame()
 
+        # ---- LEMBRETE DE CHECK-IN SEMANAL ----
+        try:
+            df_ci_lembrete = ler_planilha("checkins")
+            df_ci_lembrete['email'] = df_ci_lembrete['email'].astype(str).str.strip().str.lower()
+            meus_ci = df_ci_lembrete[df_ci_lembrete['email'] == st.session_state.email]
+            mostrar_lembrete = True
+            if not meus_ci.empty:
+                ultima_data_ci = parsear_data(meus_ci['data']).max()
+                if pd.notnull(ultima_data_ci):
+                    dias_sem_ci = (datetime.now().date() - ultima_data_ci.date()).days
+                    mostrar_lembrete = dias_sem_ci > 7
+            if mostrar_lembrete:
+                st.markdown("""
+                    <div style='background:rgba(249,192,61,0.07);border:1px solid rgba(249,192,61,0.25);
+                    border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;
+                    align-items:center;gap:12px;'>
+                        <span style='font-size:1.4rem;'>📋</span>
+                        <div>
+                            <p style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;
+                            letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Check-in Semanal</p>
+                            <p style='color:#888;font-family:Inter;font-size:12px;margin:0;'>
+                            Seu coach precisa do seu feedback semanal. Abra o menu lateral e envie!</p>
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+        except:
+            pass
+
         # ---- STREAK ----
         streak = calcular_streak(historico_geral, st.session_state.email)
         emoji_s, frase_s = frases_streak(streak)
@@ -1195,16 +1223,57 @@ else:
                     )
                 cal_html += "</div>"
                 # Legenda
-                cal_html += """
-                    <div style='display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.04);'>
-                        <div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,0.3);'></div>
-                        <span style='color:#444;font-family:Inter;font-size:9px;letter-spacing:1px;'>Volume baixo</span>
-                        <div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,1);margin-left:8px;'></div>
-                        <span style='color:#444;font-family:Inter;font-size:9px;letter-spacing:1px;'>Volume alto</span>
-                    </div>
-                """
+                cal_html += (
+                    "<div style='display:flex;align-items:center;gap:8px;margin-top:12px;"
+                    "padding-top:10px;border-top:1px solid rgba(255,255,255,0.04);'>"
+                    "<div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,0.3);'></div>"
+                    "<span style='color:#444;font-family:Inter;font-size:9px;letter-spacing:1px;'>Volume baixo</span>"
+                    "<div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,1);margin-left:8px;'></div>"
+                    "<span style='color:#444;font-family:Inter;font-size:9px;letter-spacing:1px;'>Volume alto</span></div>"
+                )
                 cal_html += "</div>"
                 st.markdown(cal_html, unsafe_allow_html=True)
+
+                # Histórico detalhado do dia selecionado
+                dias_treinados = sorted(vol_por_dia.keys())
+                if dias_treinados:
+                    st.markdown(
+                        "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;"
+                        "text-transform:uppercase;margin:16px 0 8px;'>🔍 Detalhe do Dia</p>",
+                        unsafe_allow_html=True
+                    )
+                    dia_sel = st.select_slider(
+                        "Selecione um dia treinado:",
+                        options=dias_treinados,
+                        key="cal_dia_sel",
+                        label_visibility="collapsed"
+                    )
+                    data_sel = datetime(ano, mes, dia_sel).date()
+                    df_dia = meu_hist[meu_hist['data_date'] == data_sel].copy()
+                    if not df_dia.empty:
+                        treino_do_dia = str(df_dia.iloc[0].get('treino', '')) if 'treino' in df_dia.columns else ''
+                        detalhe_html = (
+                            f"<div style='background:rgba(18,17,17,0.95);border-radius:16px;"
+                            f"overflow:hidden;margin-bottom:16px;border:1px solid rgba(255,255,255,0.05);'>"
+                            f"<div style='padding:12px 18px 8px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
+                            f"<span style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;"
+                            f"letter-spacing:2px;text-transform:uppercase;'>"
+                            f"📅 {data_sel.strftime('%d/%m/%Y')}"
+                            f"{'  •  ' + treino_do_dia if treino_do_dia and treino_do_dia != 'nan' else ''}"
+                            f"</span></div>"
+                        )
+                        for _, row_d in df_dia.sort_values('exercicio').iterrows():
+                            carga_d = float(row_d.get('carga', 0))
+                            ex_d = str(row_d.get('exercicio', ''))
+                            detalhe_html += (
+                                f"<div style='display:flex;justify-content:space-between;align-items:center;"
+                                f"padding:11px 18px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
+                                f"<div style='color:#ccc;font-family:Inter;font-size:13px;font-weight:500;'>{ex_d}</div>"
+                                f"<div style='color:#F9C03D;font-family:Space Grotesk;font-weight:700;"
+                                f"font-size:1rem;'>{carga_d:.1f} kg</div></div>"
+                            )
+                        detalhe_html += "</div>"
+                        st.markdown(detalhe_html, unsafe_allow_html=True)
 
                 # Gráfico de progressão
                 st.markdown(
