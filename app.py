@@ -539,7 +539,7 @@ else:
             else:
                 st.sidebar.error("As senhas não coincidem.")
 
-    with st.sidebar.expander("📝 Check-in Semanal"):
+    with st.sidebar.expander("📝 Check-in Quinzenal"):
         if st.session_state.get("checkin_enviado"):
             ci_data = st.session_state.get("checkin_dados", {})
             st.sidebar.markdown(
@@ -586,6 +586,35 @@ else:
         st.sidebar.divider()
         st.sidebar.subheader("🛠 PAINEL DO COACH")
         ativar_dashboard = st.sidebar.checkbox("Visualizar Métricas")
+
+        with st.sidebar.expander("➕ Cadastrar Novo Aluno"):
+            with st.form("form_novo_aluno", clear_on_submit=True):
+                novo_nome_aluno  = st.text_input("Nome Completo", placeholder="Ex: João Silva")
+                novo_email_aluno = st.text_input("E-mail", placeholder="joao@email.com")
+                nova_senha_aluno = st.text_input("Senha inicial", type="password", placeholder="Min. 4 caracteres")
+                nova_msg_aluno   = st.text_input("Mensagem de boas-vindas (opcional)")
+                if st.form_submit_button("CADASTRAR"):
+                    if novo_nome_aluno and novo_email_aluno and len(nova_senha_aluno) >= 4:
+                        try:
+                            df_u_cad = ler_sem_cache("usuarios")
+                            df_u_cad["email"] = df_u_cad["email"].astype(str).str.strip().str.lower()
+                            if novo_email_aluno.strip().lower() in df_u_cad["email"].values:
+                                st.sidebar.warning("E-mail já cadastrado.")
+                            else:
+                                novo_aluno = pd.DataFrame([{
+                                    "nome": novo_nome_aluno.strip(),
+                                    "email": novo_email_aluno.strip().lower(),
+                                    "senha": nova_senha_aluno.strip(),
+                                    "mensagem_coach": nova_msg_aluno.strip()
+                                }])
+                                conn.update(worksheet="usuarios", data=pd.concat([df_u_cad, novo_aluno], ignore_index=True))
+                                st.cache_data.clear()
+                                st.sidebar.success(f"{novo_nome_aluno} cadastrado!")
+                                st.rerun()
+                        except Exception as e:
+                            st.sidebar.error(f"Erro: {e}")
+                    else:
+                        st.sidebar.warning("Preencha nome, e-mail e senha (min. 4 caracteres).")
 
     # ==========================================================
     # DASHBOARD DO COACH
@@ -639,6 +668,90 @@ else:
 
             nome_sel = st.selectbox("Selecione o Aluno:", df_usuarios["nome"].dropna().unique().tolist(), key="coach_aluno_sel")
             email_vinculado = df_usuarios[df_usuarios["nome"] == nome_sel]["email"].iloc[0]
+
+            # Calendário de treinos do aluno selecionado
+            if not df_coach.empty:
+                df_coach["email_aluno"] = df_coach["email_aluno"].astype(str).str.strip().str.lower()
+                hist_aluno_cal = df_coach[df_coach["email_aluno"] == email_vinculado].copy()
+                if not hist_aluno_cal.empty:
+                    hist_aluno_cal["data_dt"] = parsear_data(hist_aluno_cal["data"]).dt.date
+                    hist_aluno_cal = hist_aluno_cal.dropna(subset=["data_dt"])
+
+                    st.markdown(
+                        "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;"
+                        "text-transform:uppercase;margin:16px 0 8px;'>📅 Calendário de Treinos</p>",
+                        unsafe_allow_html=True
+                    )
+
+                    if "coach_cal_mes" not in st.session_state:
+                        st.session_state.coach_cal_mes = datetime.now().replace(day=1)
+
+                    cp1, cp2, cp3 = st.columns([1, 3, 1])
+                    with cp1:
+                        if st.button("←", key="coach_cal_prev", use_container_width=True):
+                            st.session_state.coach_cal_mes = (st.session_state.coach_cal_mes - timedelta(days=1)).replace(day=1)
+                            st.rerun()
+                    with cp2:
+                        st.markdown(
+                            f"<p style='text-align:center;color:#ccc;font-family:Inter;font-size:13px;"
+                            f"font-weight:600;letter-spacing:1px;margin:10px 0;'>"
+                            f"{st.session_state.coach_cal_mes.strftime('%B %Y').upper()}</p>",
+                            unsafe_allow_html=True
+                        )
+                    with cp3:
+                        if st.session_state.coach_cal_mes < datetime.now().replace(day=1):
+                            if st.button("→", key="coach_cal_next", use_container_width=True):
+                                st.session_state.coach_cal_mes = (
+                                    st.session_state.coach_cal_mes.replace(day=28) + timedelta(days=4)
+                                ).replace(day=1)
+                                st.rerun()
+
+                    import calendar as cal_lib
+                    mes_ref_c = st.session_state.coach_cal_mes
+                    ano_c, mes_c = mes_ref_c.year, mes_ref_c.month
+                    prim_sem_c = mes_ref_c.weekday()
+                    total_dias_c = cal_lib.monthrange(ano_c, mes_c)[1]
+
+                    vol_dia_c = {}
+                    for _, rh in hist_aluno_cal.iterrows():
+                        d = rh["data_dt"]
+                        if d.year == ano_c and d.month == mes_c:
+                            vol_dia_c[d.day] = vol_dia_c.get(d.day, 0) + float(rh.get("carga", 0))
+
+                    max_v_c = max(vol_dia_c.values()) if vol_dia_c else 1
+                    nomes_sem = ["SEG","TER","QUA","QUI","SEX","SAB","DOM"]
+                    cc = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;padding:16px;margin-bottom:16px;border:1px solid rgba(255,255,255,0.05);'>"
+                    cc += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:8px;'>"
+                    for n in nomes_sem:
+                        cc += f"<div style='text-align:center;color:#333;font-family:Inter;font-size:9px;letter-spacing:1px;font-weight:600;'>{n}</div>"
+                    cc += "</div><div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;'>"
+                    for _ in range(prim_sem_c):
+                        cc += "<div></div>"
+                    hoje_d_c = datetime.now().date()
+                    for dia_c in range(1, total_dias_c + 1):
+                        data_d_c = datetime(ano_c, mes_c, dia_c).date()
+                        v_c = vol_dia_c.get(dia_c, 0)
+                        is_hj_c = data_d_c == hoje_d_c
+                        if v_c > 0:
+                            inten_c = v_c / max_v_c
+                            op_c = 0.3 + 0.7 * inten_c
+                            bg_c = f"rgba(249,192,61,{op_c:.2f})"
+                            ct_c = "#0A0A0A" if inten_c > 0.5 else "#F9C03D"
+                            bd_c = "1px solid rgba(249,192,61,0.5)"
+                        else:
+                            bg_c, ct_c, bd_c = "rgba(255,255,255,0.03)", "#333", "1px solid rgba(255,255,255,0.04)"
+                        anel_c = "box-shadow:0 0 0 2px #F9C03D;" if is_hj_c else ""
+                        cc += (f"<div style='aspect-ratio:1;display:flex;align-items:center;justify-content:center;"
+                               f"border-radius:8px;background:{bg_c};border:{bd_c};{anel_c}"
+                               f"font-family:Space Grotesk;font-size:11px;font-weight:700;color:{ct_c};'>{dia_c}</div>")
+                    cc += ("</div><div style='display:flex;align-items:center;gap:8px;margin-top:12px;"
+                           "padding-top:10px;border-top:1px solid rgba(255,255,255,0.04);'>"
+                           "<div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,0.3);'></div>"
+                           "<span style='color:#444;font-family:Inter;font-size:9px;'>Volume baixo</span>"
+                           "<div style='width:10px;height:10px;border-radius:3px;background:#F9C03D;margin-left:8px;'></div>"
+                           "<span style='color:#444;font-family:Inter;font-size:9px;'>Volume alto</span></div></div>")
+                    st.markdown(cc, unsafe_allow_html=True)
+
             st.divider()
 
             # ABAS
@@ -899,39 +1012,6 @@ else:
                             else:
                                 st.warning("Preencha o nome da ficha e do exercicio.")
 
-                    # Cadastro de novo aluno
-                    st.markdown("---")
-                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;'>➕ CADASTRAR NOVO ALUNO</p>", unsafe_allow_html=True)
-                    with st.form("form_novo_aluno", clear_on_submit=True):
-                        cna1, cna2 = st.columns(2)
-                        with cna1:
-                            novo_nome_aluno = st.text_input("Nome Completo", placeholder="Ex: João Silva")
-                        with cna2:
-                            novo_email_aluno = st.text_input("E-mail", placeholder="joao@email.com")
-                        cna3, cna4 = st.columns(2)
-                        with cna3:
-                            nova_senha_aluno = st.text_input("Senha inicial", placeholder="Min. 4 caracteres")
-                        with cna4:
-                            nova_msg_aluno = st.text_input("Mensagem de boas-vindas (opcional)")
-                        if st.form_submit_button("CADASTRAR ALUNO"):
-                            if novo_nome_aluno and novo_email_aluno and len(nova_senha_aluno) >= 4:
-                                df_u_cad = ler_sem_cache("usuarios")
-                                df_u_cad["email"] = df_u_cad["email"].astype(str).str.strip().str.lower()
-                                if novo_email_aluno.strip().lower() in df_u_cad["email"].values:
-                                    st.warning("Este e-mail já está cadastrado.")
-                                else:
-                                    novo_aluno = pd.DataFrame([{
-                                        "nome": novo_nome_aluno.strip(),
-                                        "email": novo_email_aluno.strip().lower(),
-                                        "senha": nova_senha_aluno.strip(),
-                                        "mensagem_coach": nova_msg_aluno.strip()
-                                    }])
-                                    conn.update(worksheet="usuarios", data=pd.concat([df_u_cad, novo_aluno], ignore_index=True))
-                                    st.cache_data.clear()
-                                    st.toast(f"{novo_nome_aluno} cadastrado com sucesso!", icon="👤")
-                                    st.rerun()
-                            else:
-                                st.warning("Preencha nome, e-mail e senha (min. 4 caracteres).")
                 except Exception as e:
                     st.error(f"Erro treinos: {e}")
 
