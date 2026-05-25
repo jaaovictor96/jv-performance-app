@@ -539,7 +539,7 @@ else:
             else:
                 st.sidebar.error("As senhas não coincidem.")
 
-    with st.sidebar.expander("📝 Check-in Semanal"):
+    with st.sidebar.expander("📝 Check-in Quinzenal"):
         if st.session_state.get("checkin_enviado"):
             ci_data = st.session_state.get("checkin_dados", {})
             st.sidebar.markdown(
@@ -1145,9 +1145,10 @@ else:
                         """, unsafe_allow_html=True)
                         col_ok, _ = st.columns([1, 3])
                         with col_ok:
-                            if st.button("✓ Entendido", key="dismiss_msg", use_container_width=True):
-                                st.session_state[msg_key] = True
-                                st.rerun()
+                            def _dispensar_msg(_key=msg_key):
+                                st.session_state[_key] = True
+                            st.button("✓ Entendido", key="dismiss_msg",
+                                      use_container_width=True, on_click=_dispensar_msg)
         except:
             pass
 
@@ -1378,6 +1379,10 @@ else:
 
             try:
                 df_treinos = ler_sem_cache("planilha_treinos")
+                # Proteção contra retorno vazio ou sem colunas esperadas
+                if df_treinos.empty or 'email_aluno' not in df_treinos.columns:
+                    st.info("Carregando protocolo... Aguarde um instante.")
+                    st.stop()
                 df_treinos['email_aluno'] = df_treinos['email_aluno'].astype(str).str.strip().str.lower()
                 if 'status' not in df_treinos.columns:
                     df_treinos['status'] = 'ativo'
