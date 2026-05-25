@@ -539,7 +539,7 @@ else:
             else:
                 st.sidebar.error("As senhas não coincidem.")
 
-    with st.sidebar.expander("📝 Check-in Quinzenal"):
+    with st.sidebar.expander("📝 Check-in Semanal"):
         if st.session_state.get("checkin_enviado"):
             ci_data = st.session_state.get("checkin_dados", {})
             st.sidebar.markdown(
