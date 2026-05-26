@@ -539,7 +539,7 @@ else:
             else:
                 st.sidebar.error("As senhas não coincidem.")
 
-    with st.sidebar.expander("📝 Check-in Semanal"):
+    with st.sidebar.expander("📝 Check-in Quinzenal"):
         if st.session_state.get("checkin_enviado"):
             ci_data = st.session_state.get("checkin_dados", {})
             st.sidebar.markdown(
@@ -1402,25 +1402,32 @@ else:
                         st.session_state.treino_ativo = selecao_treino
                         st.session_state.ex_index = 0
                         st.session_state.cargas_sessao = {}
+                        st.session_state.cargas_anteriores = {}
                         st.session_state.treino_finalizado = False
                         st.session_state.notas_sessao = ""
 
                     exercicios_df = meus_treinos[meus_treinos['treino_nome'] == selecao_treino].reset_index(drop=True)
                     total_ex = len(exercicios_df)
 
-                    # Pré-carrega cargas
+                    # Pré-carrega cargas e guarda anterior imutável
+                    if 'cargas_anteriores' not in st.session_state:
+                        st.session_state.cargas_anteriores = {}
+
                     for idx, row in exercicios_df.iterrows():
                         chave = f"carga_{idx}"
+                        chave_ant = f"ant_{idx}"
+                        carga_hist = 0.0
+                        if not historico_geral.empty:
+                            filtro = historico_geral[
+                                (historico_geral['email_aluno'] == st.session_state.email) &
+                                (historico_geral['exercicio'] == row['exercicio'])
+                            ]
+                            if not filtro.empty:
+                                carga_hist = float(filtro.iloc[-1]['carga'])
                         if chave not in st.session_state.cargas_sessao:
-                            carga_ant = 0.0
-                            if not historico_geral.empty:
-                                filtro = historico_geral[
-                                    (historico_geral['email_aluno'] == st.session_state.email) &
-                                    (historico_geral['exercicio'] == row['exercicio'])
-                                ]
-                                if not filtro.empty:
-                                    carga_ant = float(filtro.iloc[-1]['carga'])
-                            st.session_state.cargas_sessao[chave] = carga_ant
+                            st.session_state.cargas_sessao[chave] = carga_hist
+                        if chave_ant not in st.session_state.cargas_anteriores:
+                            st.session_state.cargas_anteriores[chave_ant] = carga_hist
 
                     # Persiste progresso via query_params — sobrevive a minimizar/recarregar
                     try:
@@ -1534,12 +1541,13 @@ else:
                         series = int(float(row['series'])) if pd.notnull(row.get('series')) else 0
                         reps   = int(float(row['reps']))   if pd.notnull(row.get('reps'))   else 0
 
+                        carga_anterior_exib = st.session_state.cargas_anteriores.get(f"ant_{idx_atual}", 0.0)
                         st.markdown(f"""
                             <div class='ex-card'>
                                 <p class='ex-label'>{selecao_treino}</p>
                                 <p class='ex-name'>{row['exercicio']}</p>
                                 <p class='ex-meta'>{series} SÉRIES × {reps} REPS</p>
-                                <p class='ex-pr'>Última carga: {carga_atual:.1f} kg</p>
+                                <p class='ex-pr'>Última carga: {carga_anterior_exib:.1f} kg</p>
                             </div>
                         """, unsafe_allow_html=True)
 
