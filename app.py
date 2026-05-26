@@ -31,23 +31,36 @@ if not st.session_state.logado and not st.session_state.saindo:
         st.session_state.logado = True
         st.session_state.email = token
 
-# Restaura progresso do treino via query_params (nativo Streamlit, 100% confiável)
+# Restaura progresso — tenta cookie primeiro, depois query_params
 if st.session_state.logado and not st.session_state.cargas_sessao:
+    progresso_raw = None
     try:
-        progresso_raw = st.query_params.get("prog")
-        if progresso_raw:
+        progresso_raw = cookie_manager.get(cookie="jv_prog")
+    except:
+        pass
+    if not progresso_raw:
+        try:
+            progresso_raw = st.query_params.get("prog")
+        except:
+            pass
+    if progresso_raw:
+        try:
             progresso = json.loads(progresso_raw)
-            st.session_state.ex_index      = progresso.get('ex_index', 0)
-            st.session_state.treino_ativo  = progresso.get('treino_ativo', '')
-            st.session_state.notas_sessao  = progresso.get('notas_sessao', '')
+            st.session_state.ex_index       = progresso.get('ex_index', 0)
+            st.session_state.treino_ativo   = progresso.get('treino_ativo', '')
+            st.session_state.notas_sessao   = progresso.get('notas_sessao', '')
             cargas_raw = progresso.get('cargas_sessao', {})
-            st.session_state.cargas_sessao = {k: float(v) for k, v in cargas_raw.items()}
-            # Restaura também os inputs de carga para cada exercício
+            st.session_state.cargas_sessao  = {k: float(v) for k, v in cargas_raw.items()}
+            st.session_state.cargas_anteriores = {
+                f"ant_{k.replace('carga_','')}": float(v)
+                for k, v in cargas_raw.items()
+                if f"ant_{k.replace('carga_','')}" not in st.session_state.get('cargas_anteriores', {})
+            }
             for k, v in st.session_state.cargas_sessao.items():
                 idx = k.replace('carga_', '')
                 st.session_state[f'input_carga_{idx}'] = v
-    except:
-        pass
+        except:
+            pass
 
 # --- 5. LOGO ---
 def get_base64_image(image_path):
@@ -1429,7 +1442,7 @@ else:
                         if chave_ant not in st.session_state.cargas_anteriores:
                             st.session_state.cargas_anteriores[chave_ant] = carga_hist
 
-                    # Persiste progresso via query_params — sobrevive a minimizar/recarregar
+                    # Persiste progresso em cookie + query_params (dupla garantia)
                     try:
                         progresso = {
                             'ex_index':      st.session_state.ex_index,
@@ -1437,7 +1450,17 @@ else:
                             'notas_sessao':  st.session_state.notas_sessao,
                             'cargas_sessao': st.session_state.cargas_sessao,
                         }
-                        st.query_params["prog"] = json.dumps(progresso)
+                        prog_json = json.dumps(progresso)
+                        # Só grava cookie se houve mudança (evita writes desnecessários)
+                        prog_hash = str(hash(prog_json) & 0xFFFFFFFF)
+                        if st.session_state.get('_prog_hash') != prog_hash:
+                            cookie_manager.set(
+                                cookie="jv_prog",
+                                val=prog_json,
+                                expires_at=datetime.now() + timedelta(hours=8)
+                            )
+                            st.session_state['_prog_hash'] = prog_hash
+                        st.query_params["prog"] = prog_json
                     except:
                         pass
 
@@ -1513,9 +1536,15 @@ else:
                         if st.button("+ Novo Treino", use_container_width=True):
                             st.session_state.ex_index = 0
                             st.session_state.cargas_sessao = {}
+                            st.session_state.cargas_anteriores = {}
                             st.session_state.treino_finalizado = False
                             st.session_state.notas_sessao = ""
+                            st.session_state['_prog_hash'] = None
                             st.cache_data.clear()
+                            try:
+                                cookie_manager.delete("jv_prog")
+                            except:
+                                pass
                             try:
                                 st.query_params.clear()
                             except:
@@ -1653,7 +1682,11 @@ else:
                                     conn.update(worksheet="registros", data=pd.concat([existente, df_envio], ignore_index=True))
                                     st.cache_data.clear()
                                     st.session_state.treino_finalizado = True
-                                    # Limpa o progresso salvo pois treino foi concluído
+                                    st.session_state['_prog_hash'] = None
+                                    try:
+                                        cookie_manager.delete("jv_prog")
+                                    except:
+                                        pass
                                     try:
                                         st.query_params.clear()
                                     except:
