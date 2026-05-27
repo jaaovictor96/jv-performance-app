@@ -1247,7 +1247,7 @@ else:
                 unsafe_allow_html=True
             )
             try:
-                df_dieta_ath = ler_planilha("dietas")
+                df_dieta_ath = ler_sem_cache("dietas")
                 df_dieta_ath["email_aluno"] = df_dieta_ath["email_aluno"].astype(str).str.strip().str.lower()
                 minha_dieta = df_dieta_ath[df_dieta_ath["email_aluno"] == st.session_state.email]
                 if minha_dieta.empty:
