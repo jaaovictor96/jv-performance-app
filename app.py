@@ -1080,7 +1080,7 @@ else:
 
                     st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:16px;'>🥗 DIETA DE " + nome_sel.upper() + "</p>", unsafe_allow_html=True)
 
-                    refeicoes_ordem = ["REF 1","REF 2","REF 3","REF 4","REF 5","REF 6", "ÁGUA"]
+                    refeicoes_ordem = ["REF 1","REF 2","REF 3","REF 4","REF 5","REF 6","ÁGUA"]
                     dieta_aluno = df_dieta[df_dieta["email_aluno"] == email_vinculado] if not df_dieta.empty else pd.DataFrame()
 
                     with st.form("form_dieta_coach", clear_on_submit=False):
