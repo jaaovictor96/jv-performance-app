@@ -545,7 +545,7 @@ else:
             else:
                 st.sidebar.error("As senhas não coincidem.")
 
-    with st.sidebar.expander("📝 Check-in Quinzenal"):
+    with st.sidebar.expander("📝 Check-in Semanal"):
         if st.session_state.get("checkin_enviado"):
             ci_data = st.session_state.get("checkin_dados", {})
             st.sidebar.markdown(
@@ -1248,6 +1248,8 @@ else:
             )
             try:
                 df_dieta_ath = ler_sem_cache("dietas")
+                if df_dieta_ath.empty or "email_aluno" not in df_dieta_ath.columns:
+                    df_dieta_ath = pd.DataFrame(columns=["email_aluno","refeicao","descricao","calorias"])
                 df_dieta_ath["email_aluno"] = df_dieta_ath["email_aluno"].astype(str).str.strip().str.lower()
                 minha_dieta = df_dieta_ath[df_dieta_ath["email_aluno"] == st.session_state.email]
                 if minha_dieta.empty:
