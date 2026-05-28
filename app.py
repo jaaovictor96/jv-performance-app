@@ -6,13 +6,11 @@ import plotly.express as px
 import time
 import base64
 import json
-from streamlit_cookies_controller import CookieController
 
 # --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
 
 # --- 2. COOKIE MANAGER ---
-cookie_manager = CookieController()
 
 # --- 3. INICIALIZAÇÃO DE ESTADO ---
 defaults = {
@@ -26,10 +24,20 @@ for k, v in defaults.items():
 
 # --- 4. PERSISTÊNCIA POR COOKIE ---
 if not st.session_state.logado and not st.session_state.saindo:
-    token = cookie_manager.get("jv_ferreira_login")
+    token = None  # login agora via query_params
     if token:
         st.session_state.logado = True
         st.session_state.email = token
+
+# Restaura login via query_params se session_state foi perdido
+if not st.session_state.logado and not st.session_state.saindo:
+    try:
+        token = st.query_params.get("uid")
+        if token:
+            st.session_state.logado = True
+            st.session_state.email  = token
+    except:
+        pass
 
 # Restaura progresso via query_params (síncrono — não depende de cookie assíncrono)
 if st.session_state.logado and 'prog_restaurado' not in st.session_state:
@@ -474,11 +482,7 @@ if not st.session_state.logado:
                     st.session_state.email = email_input
                     st.session_state.saindo = False
                     try:
-                        cookie_manager.set(
-                            "jv_ferreira_login",
-                            email_input,
-                            max_age=30*24*3600
-                        )
+                        st.query_params["uid"] = email_input
                     except:
                         pass
                     st.rerun()
@@ -507,7 +511,8 @@ else:
     if st.sidebar.button("↩ Sair", use_container_width=True):
         # 1. Deleta o cookie
         try:
-            cookie_manager.remove("jv_ferreira_login")
+            if "uid" in st.query_params:
+                del st.query_params["uid"]
         except:
             pass
         # 2. Reseta estado para defaults
@@ -543,7 +548,7 @@ else:
             else:
                 st.sidebar.error("As senhas não coincidem.")
 
-    with st.sidebar.expander("📝 Check-in Semanal"):
+    with st.sidebar.expander("📝 Check-in Quinzenal"):
         if st.session_state.get("checkin_enviado"):
             ci_data = st.session_state.get("checkin_dados", {})
             st.sidebar.markdown(
