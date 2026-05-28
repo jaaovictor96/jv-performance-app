@@ -5,12 +5,9 @@ from datetime import datetime, timedelta
 import plotly.express as px
 import time
 import base64
-import json
 
 # --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
-
-# --- 2. COOKIE MANAGER ---
 
 # --- 3. INICIALIZAÇÃO DE ESTADO ---
 defaults = {
@@ -32,7 +29,7 @@ if not st.session_state.logado and not st.session_state.saindo:
 # Restaura login via query_params se session_state foi perdido
 if not st.session_state.logado and not st.session_state.saindo:
     try:
-        token = st.query_params.get("uid")
+        token = cookie_manager.get(cookie="jv_ferreira_login")
         if token:
             st.session_state.logado = True
             st.session_state.email  = token
