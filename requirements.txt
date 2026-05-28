@@ -3,5 +3,3 @@ streamlit-gsheets-connection
 streamlit-cookies-controller
 pandas
 plotly
-gspread
-oauth2client
