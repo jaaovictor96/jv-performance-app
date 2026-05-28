@@ -1,5 +1,7 @@
 streamlit
-st-gsheets-connection
+streamlit-gsheets-connection
+streamlit-cookies-controller
 pandas
 plotly
-extra-streamlit-components
+gspread
+oauth2client
