@@ -6,13 +6,13 @@ import plotly.express as px
 import time
 import base64
 import json
-import extra_streamlit_components as stx
+from streamlit_cookies_controller import CookieController
 
 # --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
 
 # --- 2. COOKIE MANAGER ---
-cookie_manager = stx.CookieManager()
+cookie_manager = CookieController()
 
 # --- 3. INICIALIZAÇÃO DE ESTADO ---
 defaults = {
@@ -26,7 +26,7 @@ for k, v in defaults.items():
 
 # --- 4. PERSISTÊNCIA POR COOKIE ---
 if not st.session_state.logado and not st.session_state.saindo:
-    token = cookie_manager.get(cookie="jv_ferreira_login")
+    token = cookie_manager.get("jv_ferreira_login")
     if token:
         st.session_state.logado = True
         st.session_state.email = token
@@ -475,9 +475,9 @@ if not st.session_state.logado:
                     st.session_state.saindo = False
                     try:
                         cookie_manager.set(
-                            cookie="jv_ferreira_login",
-                            val=email_input,
-                            expires_at=datetime.now() + timedelta(days=30)
+                            "jv_ferreira_login",
+                            email_input,
+                            max_age=30*24*3600
                         )
                     except:
                         pass
@@ -507,9 +507,7 @@ else:
     if st.sidebar.button("↩ Sair", use_container_width=True):
         # 1. Deleta o cookie
         try:
-            todos_cookies = cookie_manager.get_all()
-            if "jv_ferreira_login" in todos_cookies:
-                cookie_manager.delete("jv_ferreira_login")
+            cookie_manager.remove("jv_ferreira_login")
         except:
             pass
         # 2. Reseta estado para defaults
