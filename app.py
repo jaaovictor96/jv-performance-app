@@ -6,13 +6,11 @@ import plotly.express as px
 import time
 import base64
 import json
-import extra_streamlit_components as stx
 
 # --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
 
 # --- 2. COOKIE MANAGER ---
-cookie_manager = stx.CookieManager()
 
 # --- 3. INICIALIZAÇÃO DE ESTADO ---
 defaults = {
@@ -24,12 +22,15 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# --- 4. PERSISTÊNCIA POR COOKIE ---
+# --- 4. PERSISTÊNCIA POR LOGIN ---
 if not st.session_state.logado and not st.session_state.saindo:
-    token = cookie_manager.get(cookie="jv_ferreira_login")
-    if token:
-        st.session_state.logado = True
-        st.session_state.email = token
+    try:
+        token = st.query_params.get("uid")
+        if token:
+            st.session_state.logado = True
+            st.session_state.email = token
+    except:
+        pass
 
 # Restaura progresso via query_params (síncrono — não depende de cookie assíncrono)
 if st.session_state.logado and 'prog_restaurado' not in st.session_state:
@@ -474,11 +475,7 @@ if not st.session_state.logado:
                     st.session_state.email = email_input
                     st.session_state.saindo = False
                     try:
-                        cookie_manager.set(
-                            cookie="jv_ferreira_login",
-                            val=email_input,
-                            expires_at=datetime.now() + timedelta(days=30)
-                        )
+                        st.query_params["uid"] = email_input
                     except:
                         pass
                     st.rerun()
@@ -507,9 +504,8 @@ else:
     if st.sidebar.button("↩ Sair", use_container_width=True):
         # 1. Deleta o cookie
         try:
-            todos_cookies = cookie_manager.get_all()
-            if "jv_ferreira_login" in todos_cookies:
-                cookie_manager.delete("jv_ferreira_login")
+            if "uid" in st.query_params:
+                del st.query_params["uid"]
         except:
             pass
         # 2. Reseta estado para defaults
@@ -545,7 +541,7 @@ else:
             else:
                 st.sidebar.error("As senhas não coincidem.")
 
-    with st.sidebar.expander("📝 Check-in Quinzenal"):
+    with st.sidebar.expander("📝 Check-in Semanal"):
         if st.session_state.get("checkin_enviado"):
             ci_data = st.session_state.get("checkin_dados", {})
             st.sidebar.markdown(
@@ -764,9 +760,10 @@ else:
             if "coach_aba" not in st.session_state:
                 st.session_state.coach_aba = "graficos"
 
-            ca1, ca2, ca3, ca4 = st.columns(4)
+            ca1, ca2, ca3, ca4, ca5 = st.columns(5)
             for key, label, col in [("graficos","📊 Graficos",ca1),("checkins","📋 Check-ins",ca2),
-                                     ("treinos","🏋 Treinos",ca3),("mensagens","📣 Mensagens",ca4)]:
+                                     ("treinos","🏋 Treinos",ca3),("mensagens","📣 Mensagens",ca4),
+                                     ("dieta","🥗 Dieta",ca5)]:
                 with col:
                     ativo = st.session_state.coach_aba == key
                     if ativo:
@@ -1068,6 +1065,58 @@ else:
                 except Exception as e:
                     st.error(f"Erro mensagens: {e}")
 
+            # ABA DIETA (COACH)
+            elif st.session_state.coach_aba == "dieta":
+                try:
+                    try:
+                        df_dieta = ler_sem_cache("dietas")
+                        df_dieta["email_aluno"] = df_dieta["email_aluno"].astype(str).str.strip().str.lower()
+                    except:
+                        df_dieta = pd.DataFrame(columns=["email_aluno","refeicao","descricao","calorias"])
+
+                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:16px;'>🥗 DIETA DE " + nome_sel.upper() + "</p>", unsafe_allow_html=True)
+
+                    refeicoes_ordem = ["REF 1","REF 2","REF 3","REF 4","REF 5","REF 6","ÁGUA"]
+                    dieta_aluno = df_dieta[df_dieta["email_aluno"] == email_vinculado] if not df_dieta.empty else pd.DataFrame()
+
+                    with st.form("form_dieta_coach", clear_on_submit=False):
+                        campos = {}
+                        for ref in refeicoes_ordem:
+                            linha = dieta_aluno[dieta_aluno["refeicao"] == ref] if not dieta_aluno.empty else pd.DataFrame()
+                            desc_atual = str(linha.iloc[0]["descricao"]).strip() if not linha.empty and pd.notnull(linha.iloc[0]["descricao"]) else ""
+                            cal_atual  = str(linha.iloc[0]["calorias"]).strip()  if not linha.empty and "calorias" in linha.columns and pd.notnull(linha.iloc[0]["calorias"]) else ""
+                            with st.expander(f"🍽️ {ref}", expanded=bool(desc_atual)):
+                                cd, cc = st.columns([4, 1])
+                                with cd:
+                                    campos[ref] = {"desc": st.text_area(f"Alimentos — {ref}", value=desc_atual, height=100, key=f"diet_{ref}_desc", label_visibility="collapsed", placeholder=f"Descreva os alimentos de {ref}...")}
+                                with cc:
+                                    campos[ref]["cal"] = st.text_input("kcal", value=cal_atual, key=f"diet_{ref}_cal", placeholder="ex: 450")
+
+                        st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+                        if st.form_submit_button("💾 SALVAR DIETA", use_container_width=True):
+                            df_base = ler_sem_cache("dietas") if True else pd.DataFrame()
+                            try:
+                                df_base["email_aluno"] = df_base["email_aluno"].astype(str).str.strip().str.lower()
+                                df_base = df_base[df_base["email_aluno"] != email_vinculado]
+                            except:
+                                df_base = pd.DataFrame(columns=["email_aluno","refeicao","descricao","calorias"])
+                            novas = []
+                            for ref, vals in campos.items():
+                                if vals["desc"].strip():
+                                    novas.append({"email_aluno": email_vinculado, "refeicao": ref,
+                                                  "descricao": vals["desc"].strip(), "calorias": vals["cal"].strip()})
+                            if novas:
+                                df_final = pd.concat([df_base, pd.DataFrame(novas)], ignore_index=True)
+                                conn.update(worksheet="dietas", data=df_final)
+                                st.cache_data.clear()
+                                st.toast(f"Dieta de {nome_sel} salva!", icon="🥗")
+                                st.rerun()
+                            else:
+                                st.warning("Preencha pelo menos uma refeição.")
+                        st.markdown("</div>", unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"Erro dieta: {e}")
+
 
     # ==========================================================
     # ÁREA DO ATLETA
@@ -1158,8 +1207,8 @@ else:
         except:
             pass
 
-        # ---- ABAS: TREINO | MINHA EVOLUÇÃO ----
-        col_t, col_e = st.columns(2)
+        # ---- ABAS: TREINO | MINHA EVOLUÇÃO | DIETA ----
+        col_t, col_e, col_d = st.columns(3)
         with col_t:
             is_treino = st.session_state.aba_ativa == 'treino'
             st.markdown(f'<div class="{"btn-primary" if is_treino else ""}">', unsafe_allow_html=True)
@@ -1170,17 +1219,92 @@ else:
         with col_e:
             is_evolucao = st.session_state.aba_ativa == 'evolucao'
             st.markdown(f'<div class="{"btn-primary" if is_evolucao else ""}">', unsafe_allow_html=True)
-            if st.button("📈 Minha Evolução", key="tab_evolucao", use_container_width=True):
+            if st.button("📈 Evolução", key="tab_evolucao", use_container_width=True):
                 st.session_state.aba_ativa = 'evolucao'
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+        with col_d:
+            is_dieta = st.session_state.aba_ativa == 'dieta'
+            st.markdown(f'<div class="{"btn-primary" if is_dieta else ""}">', unsafe_allow_html=True)
+            if st.button("🥗 Dieta", key="tab_dieta", use_container_width=True):
+                st.session_state.aba_ativa = 'dieta'
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown("---")
 
         # ==========================================================
+        # ABA: DIETA
+        # ==========================================================
+        if st.session_state.aba_ativa == 'dieta':
+            st.markdown(
+                "<h2 style='font-family:Space Grotesk;font-size:1.8rem;font-weight:900;line-height:1;margin-bottom:16px;'>"
+                "MINHA <span style='color:#F9C03D;'>DIETA</span></h2>",
+                unsafe_allow_html=True
+            )
+            try:
+                df_dieta_ath = ler_sem_cache("dietas")
+                if df_dieta_ath.empty or "email_aluno" not in df_dieta_ath.columns:
+                    df_dieta_ath = pd.DataFrame(columns=["email_aluno","refeicao","descricao","calorias"])
+                df_dieta_ath["email_aluno"] = df_dieta_ath["email_aluno"].astype(str).str.strip().str.lower()
+                minha_dieta = df_dieta_ath[df_dieta_ath["email_aluno"] == st.session_state.email]
+                if minha_dieta.empty:
+                    st.markdown(
+                        "<div style='background:rgba(28,27,27,0.9);border-radius:16px;padding:32px 24px;"
+                        "text-align:center;border:1px solid rgba(255,255,255,0.05);'>"
+                        "<p style='font-size:2rem;'>🥗</p>"
+                        "<p style='color:#555;font-family:Inter;font-size:13px;'>Sua dieta ainda não foi cadastrada.<br>Entre em contato com seu coach!</p>"
+                        "</div>",
+                        unsafe_allow_html=True
+                    )
+                else:
+                    ordem_ref = ["Cafe da Manha","Lanche da Manha","Pre-Treino","Almoco","Lanche da Tarde","Jantar","Ceia"]
+                    icones_ref = {"Cafe da Manha":"☕","Lanche da Manha":"🍎","Pre-Treino":"⚡",
+                                  "Almoco":"🍽️","Lanche da Tarde":"🥜","Jantar":"🌙","Ceia":"🌛"}
+                    total_cal = 0
+                    for ref in ordem_ref:
+                        linha = minha_dieta[minha_dieta["refeicao"] == ref]
+                        if linha.empty:
+                            continue
+                        desc = str(linha.iloc[0]["descricao"]).strip()
+                        cal  = str(linha.iloc[0].get("calorias","")).strip() if "calorias" in linha.columns else ""
+                        if not desc or desc.lower() == "nan":
+                            continue
+                        icone_r = icones_ref.get(ref, "🍴")
+                        cal_badge = f"<span style='color:#F9C03D;font-family:Space Grotesk;font-weight:700;font-size:0.9rem;'>{cal} kcal</span>" if cal and cal.lower() != "nan" else ""
+                        try:
+                            total_cal += int(cal) if cal and cal.lower() != "nan" else 0
+                        except:
+                            pass
+                        st.markdown(
+                            f"<div style='background:rgba(22,21,21,0.95);border-radius:16px;padding:18px 20px;"
+                            f"margin-bottom:10px;border:1px solid rgba(255,255,255,0.05);'>"
+                            f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>"
+                            f"<span style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;"
+                            f"letter-spacing:2px;text-transform:uppercase;'>{icone_r} {ref}</span>"
+                            f"{cal_badge}</div>"
+                            f"<p style='color:#bbb;font-family:Inter;font-size:13px;line-height:1.6;margin:0;'>{desc}</p>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+                    if total_cal > 0:
+                        st.markdown(
+                            f"<div style='background:rgba(249,192,61,0.08);border:1px solid rgba(249,192,61,0.2);"
+                            f"border-radius:14px;padding:14px 20px;display:flex;justify-content:space-between;"
+                            f"align-items:center;margin-top:8px;'>"
+                            f"<span style='color:#888;font-family:Inter;font-size:11px;letter-spacing:1px;"
+                            f"text-transform:uppercase;'>Total Estimado</span>"
+                            f"<span style='color:#F9C03D;font-family:Space Grotesk;font-weight:900;"
+                            f"font-size:1.3rem;'>{total_cal} kcal</span></div>",
+                            unsafe_allow_html=True
+                        )
+            except Exception as e:
+                st.error(f"Erro ao carregar dieta: {e}")
+
+        # ==========================================================
         # ABA: MINHA EVOLUÇÃO
         # ==========================================================
-        if st.session_state.aba_ativa == 'evolucao':
+        elif st.session_state.aba_ativa == 'evolucao':
             st.markdown(
                 "<h2 style='font-family:Space Grotesk;font-size:1.8rem;font-weight:900;line-height:1;margin-bottom:16px;'>"
                 "MINHA <span style='color:#F9C03D;'>EVOLUÇÃO</span></h2>",
