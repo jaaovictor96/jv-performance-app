@@ -460,29 +460,36 @@ if not st.session_state.logado:
 
         st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
         if st.button("ACESSAR", use_container_width=True):
-            try:
+            usuarios = pd.DataFrame()
+            for tentativa in range(4):
                 try:
                     usuarios = conn.read(worksheet="usuarios")
+                    if not usuarios.empty:
+                        break
                 except:
-                    time.sleep(1)
-                    usuarios = conn.read(worksheet="usuarios")
+                    pass
+                time.sleep(1.5)
 
-                usuarios['email'] = usuarios['email'].astype(str).str.strip().str.lower()
-                usuarios['senha'] = usuarios['senha'].astype(str).str.strip()
+            if usuarios.empty:
+                st.error("Não foi possível conectar. Verifique sua internet e tente novamente.")
+            else:
+                try:
+                    usuarios['email'] = usuarios['email'].astype(str).str.strip().str.lower()
+                    usuarios['senha'] = usuarios['senha'].astype(str).str.strip()
 
-                if ((usuarios['email'] == email_input) & (usuarios['senha'] == senha_input)).any():
-                    st.session_state.logado = True
-                    st.session_state.email = email_input
-                    st.session_state.saindo = False
-                    try:
-                        st.query_params["uid"] = email_input
-                    except:
-                        pass
-                    st.rerun()
-                else:
-                    st.error("Credenciais inválidas.")
-            except:
-                st.error("Instabilidade na rede. Tente novamente em 1 segundo.")
+                    if ((usuarios['email'] == email_input) & (usuarios['senha'] == senha_input)).any():
+                        st.session_state.logado = True
+                        st.session_state.email = email_input
+                        st.session_state.saindo = False
+                        try:
+                            st.query_params["uid"] = email_input
+                        except:
+                            pass
+                        st.rerun()
+                    else:
+                        st.error("Credenciais inválidas.")
+                except Exception as e:
+                    st.error(f"Erro ao verificar credenciais: {e}")
         st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -1243,7 +1250,15 @@ else:
                 unsafe_allow_html=True
             )
             try:
-                df_dieta_ath = ler_sem_cache("dietas")
+                df_dieta_ath = pd.DataFrame()
+                for _t in range(3):
+                    try:
+                        df_dieta_ath = ler_sem_cache("dietas")
+                        if not df_dieta_ath.empty:
+                            break
+                    except:
+                        pass
+                    time.sleep(1)
                 if df_dieta_ath.empty or "email_aluno" not in df_dieta_ath.columns:
                     df_dieta_ath = pd.DataFrame(columns=["email_aluno","refeicao","descricao","calorias"])
                 df_dieta_ath["email_aluno"] = df_dieta_ath["email_aluno"].astype(str).str.strip().str.lower()
