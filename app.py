@@ -1273,50 +1273,50 @@ else:
                         unsafe_allow_html=True
                     )
                 else:
-                    ordem_ref = ["Cafe da Manha","Lanche da Manha","Pre-Treino","Almoco","Lanche da Tarde","Jantar","Ceia"]
-                    icones_ref = {"Cafe da Manha":"☕","Lanche da Manha":"🍎","Pre-Treino":"⚡",
-                                  "Almoco":"🍽️","Lanche da Tarde":"🥜","Jantar":"🌙","Ceia":"🌛"}
                     total_cal = 0
-                    for ref in ordem_ref:
-                        linha = minha_dieta[minha_dieta["refeicao"] == ref]
-                        if linha.empty:
+                    for _, linha in minha_dieta.iterrows():
+                        ref     = str(linha.get('refeicao','')).strip()
+                        desc    = str(linha.get('descricao','')).strip()
+                        cal_val = str(linha.get('calorias','')).strip() if 'calorias' in minha_dieta.columns else ''
+                        if not ref or ref.lower() == 'nan':
                             continue
-                        desc = str(linha.iloc[0]["descricao"]).strip()
-                        cal  = str(linha.iloc[0].get("calorias","")).strip() if "calorias" in linha.columns else ""
-                        if not desc or desc.lower() == "nan":
+                        if not desc or desc.lower() == 'nan':
                             continue
-                        icone_r = icones_ref.get(ref, "🍴")
-                        cal_badge = f"<span style='color:#F9C03D;font-family:Space Grotesk;font-weight:700;font-size:0.9rem;'>{cal} kcal</span>" if cal and cal.lower() != "nan" else ""
-                        try:
-                            total_cal += int(cal) if cal and cal.lower() != "nan" else 0
-                        except:
-                            pass
+                        cal_badge = ''
+                        if cal_val and cal_val.lower() not in ('nan',''):
+                            cal_badge = f"<span style='color:#F9C03D;font-family:Space Grotesk;font-weight:700;font-size:0.9rem;'>{cal_val} kcal</span>"
+                            try:
+                                total_cal += int(cal_val)
+                            except:
+                                pass
                         st.markdown(
-                            f"<div style='background:rgba(22,21,21,0.95);border-radius:16px;padding:18px 20px;"
-                            f"margin-bottom:10px;border:1px solid rgba(255,255,255,0.05);'>"
-                            f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>"
-                            f"<span style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;"
-                            f"letter-spacing:2px;text-transform:uppercase;'>{icone_r} {ref}</span>"
-                            f"{cal_badge}</div>"
-                            f"<p style='color:#bbb;font-family:Inter;font-size:13px;line-height:1.6;margin:0;'>{desc}</p>"
-                            f"</div>",
+                            f"<div style='background:rgba(22,21,21,0.95);border-radius:16px;"
+                            f"padding:18px 20px;margin-bottom:10px;"
+                            f"border:1px solid rgba(255,255,255,0.05);'>"
+                            f"<div style='display:flex;justify-content:space-between;"
+                            f"align-items:center;margin-bottom:10px;'>"
+                            f"<span style='color:#F9C03D;font-family:Inter;font-size:9px;"
+                            f"font-weight:700;letter-spacing:2px;text-transform:uppercase;'>"
+                            f"🍽️ {ref}</span>{cal_badge}</div>"
+                            f"<p style='color:#bbb;font-family:Inter;font-size:13px;"
+                            f"line-height:1.6;margin:0;white-space:pre-line;'>{desc}</p></div>",
                             unsafe_allow_html=True
                         )
                     if total_cal > 0:
                         st.markdown(
-                            f"<div style='background:rgba(249,192,61,0.08);border:1px solid rgba(249,192,61,0.2);"
-                            f"border-radius:14px;padding:14px 20px;display:flex;justify-content:space-between;"
+                            f"<div style='background:rgba(249,192,61,0.08);"
+                            f"border:1px solid rgba(249,192,61,0.2);border-radius:14px;"
+                            f"padding:14px 20px;display:flex;justify-content:space-between;"
                             f"align-items:center;margin-top:8px;'>"
-                            f"<span style='color:#888;font-family:Inter;font-size:11px;letter-spacing:1px;"
-                            f"text-transform:uppercase;'>Total Estimado</span>"
-                            f"<span style='color:#F9C03D;font-family:Space Grotesk;font-weight:900;"
-                            f"font-size:1.3rem;'>{total_cal} kcal</span></div>",
+                            f"<span style='color:#888;font-family:Inter;font-size:11px;"
+                            f"letter-spacing:1px;text-transform:uppercase;'>Total Estimado</span>"
+                            f"<span style='color:#F9C03D;font-family:Space Grotesk;"
+                            f"font-weight:900;font-size:1.3rem;'>{total_cal} kcal</span></div>",
                             unsafe_allow_html=True
                         )
             except Exception as e:
-                st.error(f"Erro ao carregar dieta: {e}")
+                st.error(f'Erro ao carregar dieta: {e}')
 
-        # ==========================================================
         # ABA: MINHA EVOLUÇÃO
         # ==========================================================
         elif st.session_state.aba_ativa == 'evolucao':
