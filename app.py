@@ -1,11 +1,12 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import plotly.express as px
 import time
 import base64
 import json
+from streamlit_js_eval import streamlit_js_eval
 
 # --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
@@ -22,13 +23,13 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# --- 4. PERSISTÊNCIA POR LOGIN ---
+# --- 4. PERSISTÊNCIA POR LOGIN (localStorage) ---
 if not st.session_state.logado and not st.session_state.saindo:
     try:
-        token = st.query_params.get("uid")
-        if token:
+        token = streamlit_js_eval(js_expressions='localStorage.getItem("jv_uid")', key="get_uid")
+        if token and isinstance(token, str) and "@" in token:
             st.session_state.logado = True
-            st.session_state.email = token
+            st.session_state.email = token.strip().lower()
     except:
         pass
 
@@ -87,8 +88,13 @@ def ler_sem_cache(worksheet: str, tentativas: int = 3):
 
 # --- 7. FUNÇÕES DE ENGAJAMENTO ---
 
-def parsear_data(series: pd.Series) -> pd.Series:
-    """Parseia datas em formato misto (dd/mm/YYYY ou dd/mm/YYYY HH:MM) de forma robusta."""
+def agora_brasilia() -> datetime:
+    """Retorna datetime atual no fuso de Brasilia (UTC-3)."""
+    return datetime.now(timezone.utc) - timedelta(hours=3)
+
+def agora_brasilia_naive() -> datetime:
+    """Retorna datetime atual no fuso de Brasilia sem tzinfo."""
+    return (datetime.now(timezone.utc) - timedelta(hours=3)).replace(tzinfo=None)
     try:
         return pd.to_datetime(series, dayfirst=True, format='mixed', errors='coerce')
     except Exception:
@@ -106,7 +112,7 @@ def calcular_streak(historico: pd.DataFrame, email: str) -> int:
         dias = sorted(df['data_dt'].unique(), reverse=True)
         if not dias:
             return 0
-        hoje = datetime.now().date()
+        hoje = agora_brasilia_naive().date()
         # Considera streak ativo se treinou hoje OU ontem (não penaliza quem
         # treinou à noite e abre o app no dia seguinte antes de treinar)
         if (hoje - dias[0]).days > 1:
@@ -511,8 +517,10 @@ else:
     if st.sidebar.button("↩ Sair", use_container_width=True):
         # 1. Deleta o cookie
         try:
-            if "uid" in st.query_params:
-                del st.query_params["uid"]
+            streamlit_js_eval(
+                js_expressions='localStorage.removeItem("jv_uid")',
+                key="del_uid"
+            )
         except:
             pass
         # 2. Reseta estado para defaults
@@ -578,7 +586,7 @@ else:
                             df_ci = ler_sem_cache("checkins")
                         except:
                             df_ci = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
-                        data_envio = datetime.now().strftime("%d/%m/%Y")
+                        data_envio = agora_brasilia_naive().strftime("%d/%m/%Y")
                         novo = pd.DataFrame([{"data": data_envio,
                                               "email": st.session_state.email,
                                               "peso": peso_atual, "feedback": feedback}])
@@ -638,7 +646,7 @@ else:
             st.info("Nenhum aluno cadastrado.")
         else:
             df_usuarios["email"] = df_usuarios["email"].astype(str).str.strip().str.lower()
-            hoje_ref = datetime.now().date()
+            hoje_ref = agora_brasilia_naive().date()
 
             # STATUS GERAL
             if not df_coach.empty:
@@ -693,7 +701,7 @@ else:
                     )
 
                     if "coach_cal_mes" not in st.session_state:
-                        st.session_state.coach_cal_mes = datetime.now().replace(day=1)
+                        st.session_state.coach_cal_mes = agora_brasilia_naive().replace(day=1)
 
                     cp1, cp2, cp3 = st.columns([1, 3, 1])
                     with cp1:
@@ -708,7 +716,7 @@ else:
                             unsafe_allow_html=True
                         )
                     with cp3:
-                        if st.session_state.coach_cal_mes < datetime.now().replace(day=1):
+                        if st.session_state.coach_cal_mes < agora_brasilia_naive().replace(day=1):
                             if st.button("→", key="coach_cal_next", use_container_width=True):
                                 st.session_state.coach_cal_mes = (
                                     st.session_state.coach_cal_mes.replace(day=28) + timedelta(days=4)
@@ -736,7 +744,7 @@ else:
                     cc += "</div><div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;'>"
                     for _ in range(prim_sem_c):
                         cc += "<div></div>"
-                    hoje_d_c = datetime.now().date()
+                    hoje_d_c = agora_brasilia_naive().date()
                     for dia_c in range(1, total_dias_c + 1):
                         data_d_c = datetime(ano_c, mes_c, dia_c).date()
                         v_c = vol_dia_c.get(dia_c, 0)
@@ -1146,7 +1154,7 @@ else:
             if not meus_ci.empty:
                 ultima_data_ci = parsear_data(meus_ci['data']).max()
                 if pd.notnull(ultima_data_ci):
-                    dias_sem_ci = (datetime.now().date() - ultima_data_ci.date()).days
+                    dias_sem_ci = (agora_brasilia_naive().date() - ultima_data_ci.date()).days
                     mostrar_lembrete = dias_sem_ci > 7
             if mostrar_lembrete:
                 st.markdown("""
@@ -1365,7 +1373,7 @@ else:
 
                 # Navegação de mês
                 if 'cal_mes' not in st.session_state:
-                    st.session_state.cal_mes = datetime.now().replace(day=1)
+                    st.session_state.cal_mes = agora_brasilia_naive().replace(day=1)
 
                 col_prev, col_mes_label, col_next = st.columns([1, 3, 1])
                 with col_prev:
@@ -1380,7 +1388,7 @@ else:
                         unsafe_allow_html=True
                     )
                 with col_next:
-                    hoje_dt = datetime.now().replace(day=1)
+                    hoje_dt = agora_brasilia_naive().replace(day=1)
                     if st.session_state.cal_mes < hoje_dt:
                         if st.button("→", key="cal_next", use_container_width=True):
                             ultimo_dia = (st.session_state.cal_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
@@ -1418,7 +1426,7 @@ else:
                 # Células vazias antes do dia 1
                 for _ in range(primeiro_dia_semana):
                     cal_html += "<div></div>"
-                hoje_date = datetime.now().date()
+                hoje_date = agora_brasilia_naive().date()
                 for dia in range(1, total_dias + 1):
                     data_dia = datetime(ano, mes, dia).date()
                     vol = vol_por_dia.get(dia, 0)
@@ -1788,7 +1796,7 @@ else:
                                     lista = []
                                     for i, r in exercicios_df.iterrows():
                                         lista.append({
-                                            "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                                            "data": agora_brasilia_naive().strftime("%d/%m/%Y %H:%M"),
                                             "email_aluno": st.session_state.email,
                                             "treino": selecao_treino,
                                             "exercicio": r['exercicio'],
