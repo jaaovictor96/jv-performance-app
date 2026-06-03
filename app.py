@@ -88,6 +88,7 @@ def ler_sem_cache(worksheet: str, tentativas: int = 3):
 
 # --- 7. FUNÇÕES DE ENGAJAMENTO ---
 
+
 def agora_brasilia() -> datetime:
     """Retorna datetime atual no fuso de Brasilia (UTC-3)."""
     return datetime.now(timezone.utc) - timedelta(hours=3)
@@ -95,6 +96,9 @@ def agora_brasilia() -> datetime:
 def agora_brasilia_naive() -> datetime:
     """Retorna datetime atual no fuso de Brasilia sem tzinfo."""
     return (datetime.now(timezone.utc) - timedelta(hours=3)).replace(tzinfo=None)
+
+def parsear_data(series: pd.Series) -> pd.Series:
+    """Parseia datas em formato misto (dd/mm/YYYY ou dd/mm/YYYY HH:MM) de forma robusta."""
     try:
         return pd.to_datetime(series, dayfirst=True, format='mixed', errors='coerce')
     except Exception:
