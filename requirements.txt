@@ -2,4 +2,3 @@ streamlit
 st-gsheets-connection
 pandas
 plotly
-extra-streamlit-components==0.1.71
