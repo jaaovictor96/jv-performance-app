@@ -26,14 +26,25 @@ for k, v in defaults.items():
         st.session_state[k] = v
 
 # --- 4. PERSISTÊNCIA POR LOGIN ---
+# O cookie_manager é assíncrono — na primeira renderização retorna None.
+# Usamos um flag '_cookie_verificado' para forçar um segundo ciclo.
 if not st.session_state.logado and not st.session_state.saindo:
+    token = None
     try:
         token = cookie_manager.get(cookie="jv_uid")
-        if token and isinstance(token, str) and "@" in token:
-            st.session_state.logado = True
-            st.session_state.email = token.strip().lower()
     except:
         pass
+
+    if token and isinstance(token, str) and "@" in token:
+        # Cookie chegou — loga
+        st.session_state.logado = True
+        st.session_state.email = token.strip().lower()
+        st.session_state['_cookie_verificado'] = True
+    elif not st.session_state.get('_cookie_verificado'):
+        # Primeira renderização — cookie ainda não chegou, força segundo ciclo
+        st.session_state['_cookie_verificado'] = True
+        time.sleep(0.3)
+        st.rerun()
 
 # Restaura progresso via query_params (síncrono — não depende de cookie assíncrono)
 if st.session_state.logado and 'prog_restaurado' not in st.session_state:
@@ -531,6 +542,8 @@ else:
             st.session_state[k] = v
         # 3. saindo=True DEPOIS do reset (impede cookie de relogar)
         st.session_state.saindo = True
+        # 4. Reseta flag de verificação de cookie
+        st.session_state['_cookie_verificado'] = False
         time.sleep(0.3)
         st.rerun()
 
