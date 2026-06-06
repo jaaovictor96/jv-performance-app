@@ -6,12 +6,9 @@ import plotly.express as px
 import time
 import base64
 import json
-import extra_streamlit_components as stx
 
 # --- 1. CONFIGURAÇÃO ---
-# Cookie manager (instanciado uma vez)
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
-cookie_manager = stx.CookieManager()
 
 # --- 2. COOKIE MANAGER ---
 
@@ -25,26 +22,27 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# --- 4. PERSISTÊNCIA POR LOGIN ---
-# O cookie_manager é assíncrono — na primeira renderização retorna None.
-# Usamos um flag '_cookie_verificado' para forçar um segundo ciclo.
+# --- 4. PERSISTÊNCIA POR LOGIN via localStorage ---
+# Injeta script que lê localStorage e coloca na query string de forma síncrona
 if not st.session_state.logado and not st.session_state.saindo:
-    token = None
-    try:
-        token = cookie_manager.get(cookie="jv_uid")
-    except:
-        pass
-
-    if token and isinstance(token, str) and "@" in token:
-        # Cookie chegou — loga
+    uid_param = st.query_params.get("uid", "")
+    if uid_param and "@" in uid_param:
         st.session_state.logado = True
-        st.session_state.email = token.strip().lower()
-        st.session_state['_cookie_verificado'] = True
-    elif not st.session_state.get('_cookie_verificado'):
-        # Primeira renderização — cookie ainda não chegou, força segundo ciclo
-        st.session_state['_cookie_verificado'] = True
-        time.sleep(0.3)
-        st.rerun()
+        st.session_state.email = uid_param.strip().lower()
+    else:
+        # Script que lê localStorage e redireciona com ?uid= se encontrar
+        st.components.v1.html("""
+            <script>
+            const uid = localStorage.getItem('jv_uid');
+            if (uid && uid.includes('@')) {
+                const url = new URL(window.parent.location.href);
+                if (!url.searchParams.get('uid')) {
+                    url.searchParams.set('uid', uid);
+                    window.parent.location.replace(url.toString());
+                }
+            }
+            </script>
+        """, height=0)
 
 # Restaura progresso via query_params (síncrono — não depende de cookie assíncrono)
 if st.session_state.logado and 'prog_restaurado' not in st.session_state:
@@ -534,7 +532,14 @@ else:
     if st.sidebar.button("↩ Sair", use_container_width=True):
         # 1. Deleta o cookie
         try:
-            cookie_manager.delete("jv_uid")
+            st.components.v1.html("""
+                <script>
+                localStorage.removeItem('jv_uid');
+                const url = new URL(window.parent.location.href);
+                url.searchParams.delete('uid');
+                window.parent.location.replace(url.toString());
+                </script>
+            """, height=0)
         except:
             pass
         # 2. Reseta estado para defaults
@@ -542,8 +547,6 @@ else:
             st.session_state[k] = v
         # 3. saindo=True DEPOIS do reset (impede cookie de relogar)
         st.session_state.saindo = True
-        # 4. Reseta flag de verificação de cookie
-        st.session_state['_cookie_verificado'] = False
         time.sleep(0.3)
         st.rerun()
 
