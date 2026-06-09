@@ -794,10 +794,10 @@ else:
             if "coach_aba" not in st.session_state:
                 st.session_state.coach_aba = "graficos"
 
-            ca1, ca2, ca3, ca4, ca5 = st.columns(5)
+            ca1, ca2, ca3, ca4, ca5, ca6 = st.columns(6)
             for key, label, col in [("graficos","📊 Graficos",ca1),("checkins","📋 Check-ins",ca2),
                                      ("treinos","🏋 Treinos",ca3),("mensagens","📣 Mensagens",ca4),
-                                     ("dieta","🥗 Dieta",ca5)]:
+                                     ("dieta","🥗 Dieta",ca5),("pagamentos","💰 Pagamentos",ca6)]:
                 with col:
                     ativo = st.session_state.coach_aba == key
                     if ativo:
@@ -1152,6 +1152,116 @@ else:
                     st.error(f"Erro dieta: {e}")
 
 
+            # ABA PAGAMENTOS (COACH)
+            elif st.session_state.coach_aba == "pagamentos":
+                try:
+                    try:
+                        df_pag = ler_sem_cache("pagamentos")
+                        if df_pag.empty or "email_aluno" not in df_pag.columns:
+                            df_pag = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
+                        df_pag["email_aluno"] = df_pag["email_aluno"].astype(str).str.strip().str.lower()
+                    except:
+                        df_pag = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
+
+                    hoje_pag = agora_brasilia_naive().date()
+
+                    # Visão geral de todos os alunos
+                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>💰 STATUS DE PAGAMENTOS</p>", unsafe_allow_html=True)
+                    
+                    if not df_pag.empty and not df_usuarios.empty:
+                        status_pag_html = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;overflow:hidden;margin-bottom:20px;border:1px solid rgba(255,255,255,0.05);'>"
+                        for _, row_u in df_usuarios.dropna(subset=["nome"]).iterrows():
+                            em_u = str(row_u["email"]).strip().lower()
+                            nm_u = str(row_u.get("nome", em_u))
+                            pag_u = df_pag[df_pag["email_aluno"] == em_u]
+                            if pag_u.empty:
+                                cor_u, icone_u, label_u = "#555", "⚪", "Sem cadastro"
+                            else:
+                                row_p = pag_u.iloc[-1]
+                                status_u = str(row_p.get("status","")).strip().lower()
+                                venc_str = str(row_p.get("vencimento","")).strip()
+                                try:
+                                    venc_dt = parsear_data(pd.Series([venc_str])).iloc[0].date()
+                                    dias_venc = (venc_dt - hoje_pag).days
+                                    if status_u == "pago":
+                                        cor_u, icone_u, label_u = "#4ade80", "🟢", f"Pago — vence {venc_dt.strftime('%d/%m/%Y')}"
+                                    elif dias_venc < 0:
+                                        cor_u, icone_u, label_u = "#f87171", "🔴", f"ATRASADO {abs(dias_venc)} dia{'s' if abs(dias_venc)>1 else ''}"
+                                    elif dias_venc <= 5:
+                                        cor_u, icone_u, label_u = "#F9C03D", "🟡", f"Vence em {dias_venc} dia{'s' if dias_venc>1 else ''}"
+                                    else:
+                                        cor_u, icone_u, label_u = "#4ade80", "🟢", f"Em dia — vence {venc_dt.strftime('%d/%m/%Y')}"
+                                except:
+                                    cor_u, icone_u, label_u = "#555", "⚪", "Data inválida"
+                            status_pag_html += (
+                                f"<div style='display:flex;justify-content:space-between;align-items:center;"
+                                f"padding:12px 18px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
+                                f"<div style='font-family:Inter;font-size:13px;font-weight:500;color:#ccc;'>{icone_u} {nm_u}</div>"
+                                f"<div style='font-family:Inter;font-size:11px;color:{cor_u};'>{label_u}</div></div>"
+                            )
+                        status_pag_html += "</div>"
+                        st.markdown(status_pag_html, unsafe_allow_html=True)
+
+                    st.divider()
+
+                    # Gerenciar pagamento do aluno selecionado
+                    st.markdown(f"<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;'>⚙️ GERENCIAR — {nome_sel.upper()}</p>", unsafe_allow_html=True)
+
+                    pag_aluno = df_pag[df_pag["email_aluno"] == email_vinculado] if not df_pag.empty else pd.DataFrame()
+                    valor_atual = str(pag_aluno.iloc[-1].get("valor","")) if not pag_aluno.empty else ""
+                    venc_atual  = str(pag_aluno.iloc[-1].get("vencimento","")) if not pag_aluno.empty else ""
+                    pix_atual   = str(pag_aluno.iloc[-1].get("chave_pix","")) if not pag_aluno.empty else ""
+                    status_atual = str(pag_aluno.iloc[-1].get("status","pendente")) if not pag_aluno.empty else "pendente"
+
+                    with st.form("form_pag_coach", clear_on_submit=False):
+                        cp1, cp2 = st.columns(2)
+                        with cp1:
+                            valor_novo = st.text_input("Valor (R$)", value=valor_atual, placeholder="Ex: 150.00")
+                        with cp2:
+                            venc_novo = st.text_input("Vencimento (dd/mm/YYYY)", value=venc_atual, placeholder="Ex: 10/07/2026")
+                        pix_novo = st.text_input("Chave Pix", value=pix_atual, placeholder="CPF, e-mail ou telefone")
+                        status_novo = st.selectbox("Status", ["pendente","pago","atrasado"],
+                            index=["pendente","pago","atrasado"].index(status_atual) if status_atual in ["pendente","pago","atrasado"] else 0)
+                        data_pag_novo = st.text_input("Data do Pagamento (dd/mm/YYYY)", 
+                            value=str(pag_aluno.iloc[-1].get("data_pagamento","")) if not pag_aluno.empty else "",
+                            placeholder="Preencher quando pago")
+
+                        if st.form_submit_button("💾 SALVAR"):
+                            try:
+                                df_pag_full = ler_sem_cache("pagamentos")
+                                try:
+                                    df_pag_full["email_aluno"] = df_pag_full["email_aluno"].astype(str).str.strip().str.lower()
+                                    df_pag_full = df_pag_full[df_pag_full["email_aluno"] != email_vinculado]
+                                except:
+                                    df_pag_full = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
+                                nova_linha = pd.DataFrame([{
+                                    "email_aluno": email_vinculado,
+                                    "valor": valor_novo.strip(),
+                                    "vencimento": venc_novo.strip(),
+                                    "status": status_novo,
+                                    "data_pagamento": data_pag_novo.strip(),
+                                    "chave_pix": pix_novo.strip()
+                                }])
+                                conn.update(worksheet="pagamentos", data=pd.concat([df_pag_full, nova_linha], ignore_index=True))
+                                st.cache_data.clear()
+                                st.toast(f"Pagamento de {nome_sel} atualizado!", icon="💰")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro ao salvar: {e}")
+
+                    # Histórico de pagamentos
+                    if not pag_aluno.empty and len(pag_aluno) > 0:
+                        st.markdown("---")
+                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📋 Histórico</p>", unsafe_allow_html=True)
+                        st.dataframe(pag_aluno.rename(columns={
+                            "email_aluno":"Email","valor":"Valor","vencimento":"Vencimento",
+                            "status":"Status","data_pagamento":"Pago em","chave_pix":"Chave Pix"
+                        }), column_config={"Email": None}, hide_index=True, use_container_width=True)
+
+                except Exception as e:
+                    st.error(f"Erro pagamentos: {e}")
+
+
     # ==========================================================
     # ÁREA DO ATLETA
     # ==========================================================
@@ -1189,6 +1299,51 @@ else:
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
+        except:
+            pass
+
+        # ---- STATUS DE PAGAMENTO ----
+        try:
+            df_pag_ath = ler_planilha("pagamentos")
+            if not df_pag_ath.empty and "email_aluno" in df_pag_ath.columns:
+                df_pag_ath["email_aluno"] = df_pag_ath["email_aluno"].astype(str).str.strip().str.lower()
+                meu_pag = df_pag_ath[df_pag_ath["email_aluno"] == st.session_state.email]
+                if not meu_pag.empty:
+                    row_pag = meu_pag.iloc[-1]
+                    venc_str_ath = str(row_pag.get("vencimento","")).strip()
+                    status_ath = str(row_pag.get("status","")).strip().lower()
+                    valor_ath = str(row_pag.get("valor","")).strip()
+                    pix_ath = str(row_pag.get("chave_pix","")).strip()
+                    hoje_ath = agora_brasilia_naive().date()
+                    try:
+                        venc_ath = parsear_data(pd.Series([venc_str_ath])).iloc[0].date()
+                        dias_ath = (venc_ath - hoje_ath).days
+                        if status_ath != "pago" and dias_ath < 0:
+                            pix_info = f"<br><span style='font-size:11px;color:#f87171;'>Chave Pix: {pix_ath}</span>" if pix_ath and pix_ath != "nan" else ""
+                            st.markdown(
+                                f"<div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);"
+                                f"border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>"
+                                f"<span style='font-size:1.4rem;'>🔴</span>"
+                                f"<div><p style='color:#f87171;font-family:Inter;font-size:9px;font-weight:700;"
+                                f"letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento Atrasado</p>"
+                                f"<p style='color:#f87171;font-family:Inter;font-size:12px;margin:0;'>"
+                                f"Venceu em {venc_ath.strftime('%d/%m/%Y')} — R$ {valor_ath}{pix_info}</p></div></div>",
+                                unsafe_allow_html=True
+                            )
+                        elif status_ath != "pago" and dias_ath <= 5:
+                            pix_info = f"<br><span style='font-size:11px;color:#F9C03D;'>Chave Pix: {pix_ath}</span>" if pix_ath and pix_ath != "nan" else ""
+                            st.markdown(
+                                f"<div style='background:rgba(249,192,61,0.07);border:1px solid rgba(249,192,61,0.25);"
+                                f"border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>"
+                                f"<span style='font-size:1.4rem;'>💰</span>"
+                                f"<div><p style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;"
+                                f"letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento Próximo</p>"
+                                f"<p style='color:#aaa;font-family:Inter;font-size:12px;margin:0;'>"
+                                f"Vence em {dias_ath} dia{'s' if dias_ath!=1 else ''} — R$ {valor_ath}{pix_info}</p></div></div>",
+                                unsafe_allow_html=True
+                            )
+                    except:
+                        pass
         except:
             pass
 
