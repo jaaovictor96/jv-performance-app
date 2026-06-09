@@ -1146,8 +1146,8 @@ else:
                                 with cc:
                                     campos[ref]["cal"] = st.text_input("kcal", value=cal_atual, key=f"diet_{ref}_cal", placeholder="ex: 450")
 
-                        st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-                        if st.form_submit_button("💾 SALVAR DIETA", use_container_width=True):
+                        submitted_dieta = st.form_submit_button("💾 SALVAR DIETA", use_container_width=True)
+                        if submitted_dieta:
                             df_base = ler_sem_cache("dietas") if True else pd.DataFrame()
                             try:
                                 df_base["email_aluno"] = df_base["email_aluno"].astype(str).str.strip().str.lower()
@@ -1167,7 +1167,6 @@ else:
                                 st.rerun()
                             else:
                                 st.warning("Preencha pelo menos uma refeição.")
-                        st.markdown("</div>", unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"Erro dieta: {e}")
 
@@ -1243,12 +1242,15 @@ else:
                     if not pag_aluno.empty:
                         try:
                             venc_salvo = str(pag_aluno.iloc[-1].get("vencimento","")).strip()
-                            if venc_salvo.isdigit():
+                            if venc_salvo.isdigit() and int(venc_salvo) > 0:
                                 dia_venc_atual = int(venc_salvo)
-                            else:
-                                dia_venc_atual = parsear_data(pd.Series([venc_salvo])).iloc[0].day
+                            elif venc_salvo and venc_salvo.lower() != "nan":
+                                dt_parsed = parsear_data(pd.Series([venc_salvo])).iloc[0]
+                                if pd.notnull(dt_parsed):
+                                    dia_venc_atual = int(dt_parsed.day)
                         except:
                             pass
+                    dia_venc_atual = max(1, min(28, int(dia_venc_atual)))
 
                     with st.form("form_pag_coach", clear_on_submit=False):
                         cp1, cp2 = st.columns(2)
