@@ -1258,7 +1258,7 @@ else:
                             dia_venc_novo = st.number_input(
                                 "Dia de vencimento (recorrente)",
                                 min_value=1, max_value=28,
-                                value=dia_venc_atual,
+                                value=int(dia_venc_atual),
                                 help="O app calcula automaticamente o próximo vencimento todo mês"
                             )
                         pix_novo = st.text_input("Chave Pix", value=pix_atual, placeholder="CPF, e-mail ou telefone")
@@ -1268,7 +1268,8 @@ else:
                             value=str(pag_aluno.iloc[-1].get("data_pagamento","")) if not pag_aluno.empty else "",
                             placeholder="Preencher quando pago")
 
-                        if st.form_submit_button("💾 SALVAR"):
+                        submitted_pag = st.form_submit_button("💾 SALVAR", use_container_width=True)
+                        if submitted_pag:
                             try:
                                 df_pag_full = ler_sem_cache("pagamentos")
                                 try:
