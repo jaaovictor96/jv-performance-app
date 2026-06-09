@@ -1200,12 +1200,16 @@ else:
                                 status_u = str(row_p.get("status","")).strip().lower()
                                 venc_str = str(row_p.get("vencimento","")).strip()
                                 try:
-                                    # Suporta dia do mês (ex: "10") ou data completa
                                     venc_str_clean = str(venc_str).strip()
-                                    if venc_str_clean.isdigit():
+                                    if venc_str_clean.isdigit() and int(venc_str_clean) > 0:
                                         venc_dt = proximo_vencimento(int(venc_str_clean))
+                                    elif venc_str_clean and venc_str_clean.lower() != "nan":
+                                        dt_p = parsear_data(pd.Series([venc_str_clean])).iloc[0]
+                                        if pd.isnull(dt_p):
+                                            raise ValueError("data inválida")
+                                        venc_dt = dt_p.date()
                                     else:
-                                        venc_dt = parsear_data(pd.Series([venc_str_clean])).iloc[0].date()
+                                        raise ValueError("sem data")
                                     dias_venc = (venc_dt - hoje_pag).days
                                     if status_u == "pago":
                                         cor_u, icone_u, label_u = "#4ade80", "🟢", f"Pago — vence {venc_dt.strftime('%d/%m/%Y')}"
