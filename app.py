@@ -108,6 +108,26 @@ def agora_brasilia_naive() -> datetime:
     """Retorna datetime atual no fuso de Brasilia sem tzinfo."""
     return (datetime.now(timezone.utc) - timedelta(hours=3)).replace(tzinfo=None)
 
+def proximo_vencimento(dia_venc: int) -> 'datetime.date':
+    """Calcula a próxima data de vencimento com base no dia do mês.
+    Se o dia já passou este mês, retorna o mesmo dia do próximo mês."""
+    import calendar
+    hoje = agora_brasilia_naive().date()
+    ano, mes = hoje.year, hoje.month
+    # Ajusta dia para o máximo do mês (ex: dia 31 em fevereiro → dia 28)
+    ultimo_dia = calendar.monthrange(ano, mes)[1]
+    dia_ajustado = min(dia_venc, ultimo_dia)
+    venc_este_mes = hoje.replace(day=dia_ajustado)
+    if venc_este_mes >= hoje:
+        return venc_este_mes
+    # Já passou — próximo mês
+    if mes == 12:
+        ano, mes = ano + 1, 1
+    else:
+        mes += 1
+    ultimo_dia_prox = calendar.monthrange(ano, mes)[1]
+    return hoje.replace(year=ano, month=mes, day=min(dia_venc, ultimo_dia_prox))
+
 def parsear_data(series: pd.Series) -> pd.Series:
     """Parseia datas em formato misto (dd/mm/YYYY ou dd/mm/YYYY HH:MM) de forma robusta."""
     try:
@@ -1181,7 +1201,12 @@ else:
                                 status_u = str(row_p.get("status","")).strip().lower()
                                 venc_str = str(row_p.get("vencimento","")).strip()
                                 try:
-                                    venc_dt = parsear_data(pd.Series([venc_str])).iloc[0].date()
+                                    # Suporta dia do mês (ex: "10") ou data completa
+                                    venc_str_clean = str(venc_str).strip()
+                                    if venc_str_clean.isdigit():
+                                        venc_dt = proximo_vencimento(int(venc_str_clean))
+                                    else:
+                                        venc_dt = parsear_data(pd.Series([venc_str_clean])).iloc[0].date()
                                     dias_venc = (venc_dt - hoje_pag).days
                                     if status_u == "pago":
                                         cor_u, icone_u, label_u = "#4ade80", "🟢", f"Pago — vence {venc_dt.strftime('%d/%m/%Y')}"
@@ -1213,16 +1238,33 @@ else:
                     pix_atual   = str(pag_aluno.iloc[-1].get("chave_pix","")) if not pag_aluno.empty else ""
                     status_atual = str(pag_aluno.iloc[-1].get("status","pendente")) if not pag_aluno.empty else "pendente"
 
+                    # Extrai dia do mês do vencimento salvo
+                    dia_venc_atual = 10
+                    if not pag_aluno.empty:
+                        try:
+                            venc_salvo = str(pag_aluno.iloc[-1].get("vencimento","")).strip()
+                            if venc_salvo.isdigit():
+                                dia_venc_atual = int(venc_salvo)
+                            else:
+                                dia_venc_atual = parsear_data(pd.Series([venc_salvo])).iloc[0].day
+                        except:
+                            pass
+
                     with st.form("form_pag_coach", clear_on_submit=False):
                         cp1, cp2 = st.columns(2)
                         with cp1:
                             valor_novo = st.text_input("Valor (R$)", value=valor_atual, placeholder="Ex: 150.00")
                         with cp2:
-                            venc_novo = st.text_input("Vencimento (dd/mm/YYYY)", value=venc_atual, placeholder="Ex: 10/07/2026")
+                            dia_venc_novo = st.number_input(
+                                "Dia de vencimento (recorrente)",
+                                min_value=1, max_value=28,
+                                value=dia_venc_atual,
+                                help="O app calcula automaticamente o próximo vencimento todo mês"
+                            )
                         pix_novo = st.text_input("Chave Pix", value=pix_atual, placeholder="CPF, e-mail ou telefone")
                         status_novo = st.selectbox("Status", ["pendente","pago","atrasado"],
                             index=["pendente","pago","atrasado"].index(status_atual) if status_atual in ["pendente","pago","atrasado"] else 0)
-                        data_pag_novo = st.text_input("Data do Pagamento (dd/mm/YYYY)", 
+                        data_pag_novo = st.text_input("Data do Pagamento (dd/mm/YYYY)",
                             value=str(pag_aluno.iloc[-1].get("data_pagamento","")) if not pag_aluno.empty else "",
                             placeholder="Preencher quando pago")
 
@@ -1237,14 +1279,14 @@ else:
                                 nova_linha = pd.DataFrame([{
                                     "email_aluno": email_vinculado,
                                     "valor": valor_novo.strip(),
-                                    "vencimento": venc_novo.strip(),
+                                    "vencimento": str(int(dia_venc_novo)),  # salva só o dia
                                     "status": status_novo,
                                     "data_pagamento": data_pag_novo.strip(),
                                     "chave_pix": pix_novo.strip()
                                 }])
                                 conn.update(worksheet="pagamentos", data=pd.concat([df_pag_full, nova_linha], ignore_index=True))
                                 st.cache_data.clear()
-                                st.toast(f"Pagamento de {nome_sel} atualizado!", icon="💰")
+                                st.toast(f"Pagamento de {nome_sel} atualizado! Vence todo dia {int(dia_venc_novo)}.", icon="💰")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Erro ao salvar: {e}")
@@ -1316,7 +1358,11 @@ else:
                     pix_ath = str(row_pag.get("chave_pix","")).strip()
                     hoje_ath = agora_brasilia_naive().date()
                     try:
-                        venc_ath = parsear_data(pd.Series([venc_str_ath])).iloc[0].date()
+                        venc_str_clean_ath = str(venc_str_ath).strip()
+                        if venc_str_clean_ath.isdigit():
+                            venc_ath = proximo_vencimento(int(venc_str_clean_ath))
+                        else:
+                            venc_ath = parsear_data(pd.Series([venc_str_clean_ath])).iloc[0].date()
                         dias_ath = (venc_ath - hoje_ath).days
                         if status_ath != "pago" and dias_ath < 0:
                             pix_info = f"<br><span style='font-size:11px;color:#f87171;'>Chave Pix: {pix_ath}</span>" if pix_ath and pix_ath != "nan" else ""
