@@ -1445,74 +1445,101 @@ else:
                         st.warning(f"Erro ao ler vencimento: {e_parse}")
 
                     if venc_ath is not None:
-                        # proximo_vencimento retorna sempre data futura.
-                        # Precisamos checar se o ciclo DO MÊS ATUAL está pago.
-                        # Se status != "pago", calculamos dias em relação ao vencimento
-                        # deste mês (que pode já ter passado).
                         import calendar as _cal
                         hoje_ath = agora_brasilia_naive().date()
-                        if venc_str_ath.isdigit():
-                            dia_n = int(venc_str_ath)
-                            ult_dia_mes = _cal.monthrange(hoje_ath.year, hoje_ath.month)[1]
-                            venc_este_mes = hoje_ath.replace(day=min(dia_n, ult_dia_mes))
-                            # dias em relação ao vencimento deste mês (negativo = passou)
-                            dias_ath = (venc_este_mes - hoje_ath).days
-                        else:
-                            dias_ath = (venc_ath - hoje_ath).days
                         pix_info_red = f"<p style='color:#f87171;font-family:Inter;font-size:12px;margin:6px 0 0;'>Chave Pix: <b>{pix_ath}</b></p>" if pix_ath and pix_ath.lower() != "nan" else ""
                         pix_info_yel = f"<p style='color:#F9C03D;font-family:Inter;font-size:12px;margin:6px 0 0;'>Chave Pix: <b>{pix_ath}</b></p>" if pix_ath and pix_ath.lower() != "nan" else ""
 
-                        # BLOQUEIO: 3+ dias de atraso e status != pago
-                        if status_ath != "pago" and dias_ath <= -3:
-                            dias_atraso = abs(dias_ath)
-                            st.markdown(f"""
-                                <div style='background:rgba(248,113,113,0.10);border:1.5px solid rgba(248,113,113,0.5);
-                                border-radius:18px;padding:28px 22px;margin-bottom:20px;text-align:center;'>
-                                    <p style='font-size:2.5rem;margin:0 0 10px;'>🔒</p>
-                                    <p style='color:#f87171;font-family:Space Grotesk,sans-serif;font-size:1.2rem;
-                                    font-weight:900;letter-spacing:-0.5px;text-transform:uppercase;margin:0 0 8px;'>
-                                    Acesso Bloqueado</p>
-                                    <p style='color:#f87171;font-family:Inter;font-size:13px;margin:0 0 6px;'>
-                                    Pagamento em atraso há <b>{dias_atraso} dia{'s' if dias_atraso>1 else ''}</b> — R$ {valor_ath}</p>
-                                    <p style='color:#aaa;font-family:Inter;font-size:11px;margin:0;'>
-                                    Regularize seu pagamento para continuar acessando o app.</p>
-                                    {pix_info_red}
-                                </div>
-                            """, unsafe_allow_html=True)
-                            st.stop()
+                        if status_ath == "pago":
+                            # Mostra próximo vencimento
+                            prox_venc = proximo_vencimento(int(venc_str_ath)) if venc_str_ath.isdigit() else venc_ath
+                            dias_prox = (prox_venc - hoje_ath).days
+                            if dias_prox <= 5:
+                                st.markdown(f"""
+                                    <div style='background:rgba(249,192,61,0.07);border:1px solid rgba(249,192,61,0.25);
+                                    border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>
+                                        <span style='font-size:1.4rem;'>💰</span>
+                                        <div>
+                                            <p style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;
+                                            letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Próximo Pagamento</p>
+                                            <p style='color:#aaa;font-family:Inter;font-size:12px;margin:0;'>
+                                            Vence em {dias_prox} dia{'s' if dias_prox!=1 else ''} ({prox_venc.strftime('%d/%m/%Y')}) — R$ {valor_ath}</p>
+                                            {pix_info_yel}
+                                        </div>
+                                    </div>
+                                """, unsafe_allow_html=True)
+                            else:
+                                st.markdown(f"""
+                                    <div style='background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);
+                                    border-radius:14px;padding:12px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>
+                                        <span style='font-size:1.2rem;'>✅</span>
+                                        <div>
+                                            <p style='color:#4ade80;font-family:Inter;font-size:9px;font-weight:700;
+                                            letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento em Dia</p>
+                                            <p style='color:#aaa;font-family:Inter;font-size:12px;margin:0;'>
+                                            Próximo vencimento: {prox_venc.strftime('%d/%m/%Y')} — R$ {valor_ath}</p>
+                                        </div>
+                                    </div>
+                                """, unsafe_allow_html=True)
 
-                        # Banner vermelho: atrasado mas ainda sem bloqueio (1-2 dias)
-                        elif status_ath != "pago" and dias_ath < 0:
-                            dias_atraso = abs(dias_ath)
-                            st.markdown(f"""
-                                <div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);
-                                border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>
-                                    <span style='font-size:1.4rem;'>🔴</span>
-                                    <div>
-                                        <p style='color:#f87171;font-family:Inter;font-size:9px;font-weight:700;
-                                        letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento Atrasado</p>
-                                        <p style='color:#f87171;font-family:Inter;font-size:12px;margin:0;'>
-                                        Venceu há {dias_atraso} dia{'s' if dias_atraso>1 else ''} — R$ {valor_ath}. O acesso será bloqueado em breve.</p>
+                        else:
+                            # Pendente/atrasado — calcula em relação ao vencimento deste mês
+                            if venc_str_ath.isdigit():
+                                dia_n = int(venc_str_ath)
+                                ult_dia_mes = _cal.monthrange(hoje_ath.year, hoje_ath.month)[1]
+                                venc_ref = hoje_ath.replace(day=min(dia_n, ult_dia_mes))
+                            else:
+                                venc_ref = venc_ath
+                            dias_ath = (venc_ref - hoje_ath).days
+
+                            if dias_ath <= -3:
+                                dias_atraso = abs(dias_ath)
+                                st.markdown(f"""
+                                    <div style='background:rgba(248,113,113,0.10);border:1.5px solid rgba(248,113,113,0.5);
+                                    border-radius:18px;padding:28px 22px;margin-bottom:20px;text-align:center;'>
+                                        <p style='font-size:2.5rem;margin:0 0 10px;'>🔒</p>
+                                        <p style='color:#f87171;font-family:Space Grotesk,sans-serif;font-size:1.2rem;
+                                        font-weight:900;letter-spacing:-0.5px;text-transform:uppercase;margin:0 0 8px;'>
+                                        Acesso Bloqueado</p>
+                                        <p style='color:#f87171;font-family:Inter;font-size:13px;margin:0 0 6px;'>
+                                        Pagamento em atraso há <b>{dias_atraso} dia{'s' if dias_atraso>1 else ''}</b> — R$ {valor_ath}</p>
+                                        <p style='color:#aaa;font-family:Inter;font-size:11px;margin:0;'>
+                                        Regularize seu pagamento para continuar acessando o app.</p>
                                         {pix_info_red}
                                     </div>
-                                </div>
-                            """, unsafe_allow_html=True)
+                                """, unsafe_allow_html=True)
+                                st.stop()
 
-                        # Banner amarelo: vence em até 5 dias
-                        elif status_ath != "pago" and dias_ath <= 5:
-                            st.markdown(f"""
-                                <div style='background:rgba(249,192,61,0.07);border:1px solid rgba(249,192,61,0.25);
-                                border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>
-                                    <span style='font-size:1.4rem;'>💰</span>
-                                    <div>
-                                        <p style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;
-                                        letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento Próximo</p>
-                                        <p style='color:#aaa;font-family:Inter;font-size:12px;margin:0;'>
-                                        Vence em {dias_ath} dia{'s' if dias_ath!=1 else ''} ({venc_ath.strftime('%d/%m/%Y')}) — R$ {valor_ath}</p>
-                                        {pix_info_yel}
+                            elif dias_ath < 0:
+                                dias_atraso = abs(dias_ath)
+                                st.markdown(f"""
+                                    <div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);
+                                    border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>
+                                        <span style='font-size:1.4rem;'>🔴</span>
+                                        <div>
+                                            <p style='color:#f87171;font-family:Inter;font-size:9px;font-weight:700;
+                                            letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento Atrasado</p>
+                                            <p style='color:#f87171;font-family:Inter;font-size:12px;margin:0;'>
+                                            Venceu há {dias_atraso} dia{'s' if dias_atraso>1 else ''} — R$ {valor_ath}. O acesso será bloqueado em breve.</p>
+                                            {pix_info_red}
+                                        </div>
                                     </div>
-                                </div>
-                            """, unsafe_allow_html=True)
+                                """, unsafe_allow_html=True)
+
+                            elif dias_ath <= 5:
+                                st.markdown(f"""
+                                    <div style='background:rgba(249,192,61,0.07);border:1px solid rgba(249,192,61,0.25);
+                                    border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>
+                                        <span style='font-size:1.4rem;'>💰</span>
+                                        <div>
+                                            <p style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;
+                                            letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento Próximo</p>
+                                            <p style='color:#aaa;font-family:Inter;font-size:12px;margin:0;'>
+                                            Vence em {dias_ath} dia{'s' if dias_ath!=1 else ''} ({venc_ref.strftime('%d/%m/%Y')}) — R$ {valor_ath}</p>
+                                            {pix_info_yel}
+                                        </div>
+                                    </div>
+                                """, unsafe_allow_html=True)
         except Exception as e_pag:
             pass  # pagamentos não cadastrados — silencioso
 
