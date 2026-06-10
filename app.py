@@ -1268,14 +1268,65 @@ else:
                                 help="O app calcula automaticamente o próximo vencimento todo mês"
                             )
                         pix_novo = st.text_input("Chave Pix", value=pix_atual, placeholder="CPF, e-mail ou telefone")
-                        status_novo = st.selectbox("Status", ["pendente","pago","atrasado"],
-                            index=["pendente","pago","atrasado"].index(status_atual) if status_atual in ["pendente","pago","atrasado"] else 0)
-                        data_pag_novo = st.text_input("Data do Pagamento (dd/mm/YYYY)",
-                            value=str(pag_aluno.iloc[-1].get("data_pagamento","")) if not pag_aluno.empty else "",
-                            placeholder="Preencher quando pago")
 
-                        submitted_pag = st.form_submit_button("💾 SALVAR", use_container_width=True)
+                        submitted_pag = st.form_submit_button("💾 SALVAR CADASTRO", use_container_width=True)
                         if submitted_pag:
+                            try:
+                                df_pag_full = ler_sem_cache("pagamentos")
+                                try:
+                                    df_pag_full["email_aluno"] = df_pag_full["email_aluno"].astype(str).str.strip().str.lower()
+                                    df_pag_full = df_pag_full[df_pag_full["email_aluno"] != email_vinculado]
+                                except:
+                                    df_pag_full = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
+                                # Mantém status e data_pagamento existentes ao salvar cadastro
+                                status_manter = status_atual if status_atual in ["pendente","pago","atrasado"] else "pendente"
+                                data_pag_manter = str(pag_aluno.iloc[-1].get("data_pagamento","")) if not pag_aluno.empty else ""
+                                nova_linha = pd.DataFrame([{
+                                    "email_aluno": email_vinculado,
+                                    "valor": valor_novo.strip(),
+                                    "vencimento": str(int(dia_venc_novo)),
+                                    "status": status_manter,
+                                    "data_pagamento": data_pag_manter,
+                                    "chave_pix": pix_novo.strip()
+                                }])
+                                conn.update(worksheet="pagamentos", data=pd.concat([df_pag_full, nova_linha], ignore_index=True))
+                                st.cache_data.clear()
+                                st.toast(f"Cadastro de {nome_sel} salvo! Vence todo dia {int(dia_venc_novo)}.", icon="💾")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro ao salvar: {e}")
+
+                    # Botão PAGO (fora do form) — registra data de hoje automaticamente
+                    st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
+                    col_pago, col_desfazer = st.columns(2)
+                    with col_pago:
+                        st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+                        if st.button("✓ PAGO", key="btn_marcar_pago", use_container_width=True):
+                            try:
+                                df_pag_full = ler_sem_cache("pagamentos")
+                                try:
+                                    df_pag_full["email_aluno"] = df_pag_full["email_aluno"].astype(str).str.strip().str.lower()
+                                    df_pag_full = df_pag_full[df_pag_full["email_aluno"] != email_vinculado]
+                                except:
+                                    df_pag_full = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
+                                hoje_str = agora_brasilia_naive().strftime("%d/%m/%Y")
+                                nova_linha = pd.DataFrame([{
+                                    "email_aluno": email_vinculado,
+                                    "valor": valor_atual,
+                                    "vencimento": str(int(dia_venc_atual)),
+                                    "status": "pago",
+                                    "data_pagamento": hoje_str,
+                                    "chave_pix": pix_atual
+                                }])
+                                conn.update(worksheet="pagamentos", data=pd.concat([df_pag_full, nova_linha], ignore_index=True))
+                                st.cache_data.clear()
+                                st.toast(f"✅ Pagamento de {nome_sel} registrado em {hoje_str}!", icon="✅")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro ao marcar como pago: {e}")
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    with col_desfazer:
+                        if st.button("↩ Desfazer / Pendente", key="btn_desfazer_pago", use_container_width=True):
                             try:
                                 df_pag_full = ler_sem_cache("pagamentos")
                                 try:
@@ -1285,18 +1336,34 @@ else:
                                     df_pag_full = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
                                 nova_linha = pd.DataFrame([{
                                     "email_aluno": email_vinculado,
-                                    "valor": valor_novo.strip(),
-                                    "vencimento": str(int(dia_venc_novo)),  # salva só o dia
-                                    "status": status_novo,
-                                    "data_pagamento": data_pag_novo.strip(),
-                                    "chave_pix": pix_novo.strip()
+                                    "valor": valor_atual,
+                                    "vencimento": str(int(dia_venc_atual)),
+                                    "status": "pendente",
+                                    "data_pagamento": "",
+                                    "chave_pix": pix_atual
                                 }])
                                 conn.update(worksheet="pagamentos", data=pd.concat([df_pag_full, nova_linha], ignore_index=True))
                                 st.cache_data.clear()
-                                st.toast(f"Pagamento de {nome_sel} atualizado! Vence todo dia {int(dia_venc_novo)}.", icon="💰")
+                                st.toast(f"Status de {nome_sel} revertido para pendente.", icon="↩")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Erro ao salvar: {e}")
+                                st.error(f"Erro ao desfazer: {e}")
+                    # Exibe status atual visivelmente
+                    st.markdown("<div style='margin-top:6px;'></div>", unsafe_allow_html=True)
+                    if not pag_aluno.empty:
+                        data_pag_exib = str(pag_aluno.iloc[-1].get("data_pagamento","")).strip()
+                        if status_atual == "pago" and data_pag_exib and data_pag_exib.lower() not in ("nan",""):
+                            st.markdown(f"<p style='color:#4ade80;font-family:Inter;font-size:12px;text-align:center;margin:0;'>✅ Pago em {data_pag_exib}</p>", unsafe_allow_html=True)
+                        elif status_atual in ("atrasado","pendente"):
+                            try:
+                                venc_exib = proximo_vencimento(int(dia_venc_atual))
+                                dias_exib = (venc_exib - agora_brasilia_naive().date()).days
+                                if dias_exib < 0:
+                                    st.markdown(f"<p style='color:#f87171;font-family:Inter;font-size:12px;text-align:center;margin:0;'>🔴 Atrasado {abs(dias_exib)} dia{'s' if abs(dias_exib)>1 else ''}</p>", unsafe_allow_html=True)
+                                else:
+                                    st.markdown(f"<p style='color:#F9C03D;font-family:Inter;font-size:12px;text-align:center;margin:0;'>⏳ Vence em {dias_exib} dia{'s' if dias_exib!=1 else ''} ({venc_exib.strftime('%d/%m/%Y')})</p>", unsafe_allow_html=True)
+                            except:
+                                pass
 
                     # Histórico de pagamentos
                     if not pag_aluno.empty and len(pag_aluno) > 0:
@@ -1351,7 +1418,7 @@ else:
         except:
             pass
 
-        # ---- STATUS DE PAGAMENTO ----
+        # ---- STATUS DE PAGAMENTO + BLOQUEIO ----
         try:
             df_pag_ath = ler_planilha("pagamentos")
             if not df_pag_ath.empty and "email_aluno" in df_pag_ath.columns:
@@ -1360,41 +1427,70 @@ else:
                 if not meu_pag.empty:
                     row_pag = meu_pag.iloc[-1]
                     venc_str_ath = str(row_pag.get("vencimento","")).strip()
-                    status_ath = str(row_pag.get("status","")).strip().lower()
-                    valor_ath = str(row_pag.get("valor","")).strip()
-                    pix_ath = str(row_pag.get("chave_pix","")).strip()
-                    hoje_ath = agora_brasilia_naive().date()
+                    status_ath   = str(row_pag.get("status","")).strip().lower()
+                    valor_ath    = str(row_pag.get("valor","")).strip()
+                    pix_ath      = str(row_pag.get("chave_pix","")).strip()
+                    hoje_ath     = agora_brasilia_naive().date()
                     try:
-                        venc_str_clean_ath = str(venc_str_ath).strip()
-                        if venc_str_clean_ath.isdigit():
-                            venc_ath = proximo_vencimento(int(venc_str_clean_ath))
+                        if venc_str_ath.isdigit():
+                            venc_ath = proximo_vencimento(int(venc_str_ath))
                         else:
-                            venc_ath = parsear_data(pd.Series([venc_str_clean_ath])).iloc[0].date()
+                            venc_ath = parsear_data(pd.Series([venc_str_ath])).iloc[0].date()
                         dias_ath = (venc_ath - hoje_ath).days
-                        if status_ath != "pago" and dias_ath < 0:
-                            pix_info = f"<br><span style='font-size:11px;color:#f87171;'>Chave Pix: {pix_ath}</span>" if pix_ath and pix_ath != "nan" else ""
-                            st.markdown(
-                                f"<div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);"
-                                f"border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>"
-                                f"<span style='font-size:1.4rem;'>🔴</span>"
-                                f"<div><p style='color:#f87171;font-family:Inter;font-size:9px;font-weight:700;"
-                                f"letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento Atrasado</p>"
-                                f"<p style='color:#f87171;font-family:Inter;font-size:12px;margin:0;'>"
-                                f"Venceu em {venc_ath.strftime('%d/%m/%Y')} — R$ {valor_ath}{pix_info}</p></div></div>",
-                                unsafe_allow_html=True
-                            )
+                        pix_info_red = f"<p style='color:#f87171;font-family:Inter;font-size:12px;margin:6px 0 0;'>Chave Pix: <b>{pix_ath}</b></p>" if pix_ath and pix_ath.lower() != "nan" else ""
+                        pix_info_yel = f"<p style='color:#F9C03D;font-family:Inter;font-size:12px;margin:6px 0 0;'>Chave Pix: <b>{pix_ath}</b></p>" if pix_ath and pix_ath.lower() != "nan" else ""
+
+                        # BLOQUEIO: 3+ dias de atraso e status != pago
+                        if status_ath != "pago" and dias_ath <= -3:
+                            dias_atraso = abs(dias_ath)
+                            st.markdown(f"""
+                                <div style='background:rgba(248,113,113,0.10);border:1.5px solid rgba(248,113,113,0.5);
+                                border-radius:18px;padding:28px 22px;margin-bottom:20px;text-align:center;'>
+                                    <p style='font-size:2.5rem;margin:0 0 10px;'>🔒</p>
+                                    <p style='color:#f87171;font-family:Space Grotesk,sans-serif;font-size:1.2rem;
+                                    font-weight:900;letter-spacing:-0.5px;text-transform:uppercase;margin:0 0 8px;'>
+                                    Acesso Bloqueado</p>
+                                    <p style='color:#f87171;font-family:Inter;font-size:13px;margin:0 0 6px;'>
+                                    Pagamento em atraso há <b>{dias_atraso} dia{'s' if dias_atraso>1 else ''}</b> — R$ {valor_ath}</p>
+                                    <p style='color:#aaa;font-family:Inter;font-size:11px;margin:0;'>
+                                    Regularize seu pagamento para continuar acessando o app.</p>
+                                    {pix_info_red}
+                                </div>
+                            """, unsafe_allow_html=True)
+                            st.stop()
+
+                        # Banner vermelho: atrasado mas ainda sem bloqueio (1-2 dias)
+                        elif status_ath != "pago" and dias_ath < 0:
+                            dias_atraso = abs(dias_ath)
+                            st.markdown(f"""
+                                <div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);
+                                border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>
+                                    <span style='font-size:1.4rem;'>🔴</span>
+                                    <div>
+                                        <p style='color:#f87171;font-family:Inter;font-size:9px;font-weight:700;
+                                        letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento Atrasado</p>
+                                        <p style='color:#f87171;font-family:Inter;font-size:12px;margin:0;'>
+                                        Venceu há {dias_atraso} dia{'s' if dias_atraso>1 else ''} — R$ {valor_ath}. O acesso será bloqueado em breve.</p>
+                                        {pix_info_red}
+                                    </div>
+                                </div>
+                            """, unsafe_allow_html=True)
+
+                        # Banner amarelo: vence em até 5 dias
                         elif status_ath != "pago" and dias_ath <= 5:
-                            pix_info = f"<br><span style='font-size:11px;color:#F9C03D;'>Chave Pix: {pix_ath}</span>" if pix_ath and pix_ath != "nan" else ""
-                            st.markdown(
-                                f"<div style='background:rgba(249,192,61,0.07);border:1px solid rgba(249,192,61,0.25);"
-                                f"border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>"
-                                f"<span style='font-size:1.4rem;'>💰</span>"
-                                f"<div><p style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;"
-                                f"letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento Próximo</p>"
-                                f"<p style='color:#aaa;font-family:Inter;font-size:12px;margin:0;'>"
-                                f"Vence em {dias_ath} dia{'s' if dias_ath!=1 else ''} — R$ {valor_ath}{pix_info}</p></div></div>",
-                                unsafe_allow_html=True
-                            )
+                            st.markdown(f"""
+                                <div style='background:rgba(249,192,61,0.07);border:1px solid rgba(249,192,61,0.25);
+                                border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>
+                                    <span style='font-size:1.4rem;'>💰</span>
+                                    <div>
+                                        <p style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;
+                                        letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento Próximo</p>
+                                        <p style='color:#aaa;font-family:Inter;font-size:12px;margin:0;'>
+                                        Vence em {dias_ath} dia{'s' if dias_ath!=1 else ''} ({venc_ath.strftime('%d/%m/%Y')}) — R$ {valor_ath}</p>
+                                        {pix_info_yel}
+                                    </div>
+                                </div>
+                            """, unsafe_allow_html=True)
                     except:
                         pass
         except:
