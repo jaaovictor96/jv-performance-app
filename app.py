@@ -1431,12 +1431,34 @@ else:
                     valor_ath    = str(row_pag.get("valor","")).strip()
                     pix_ath      = str(row_pag.get("chave_pix","")).strip()
                     hoje_ath     = agora_brasilia_naive().date()
+
+                    # Parse do vencimento
+                    venc_ath = None
                     try:
-                        if venc_str_ath.isdigit():
+                        if venc_str_ath.isdigit() and int(venc_str_ath) > 0:
                             venc_ath = proximo_vencimento(int(venc_str_ath))
+                        elif venc_str_ath and venc_str_ath.lower() != "nan":
+                            dt_p = parsear_data(pd.Series([venc_str_ath])).iloc[0]
+                            if pd.notnull(dt_p):
+                                venc_ath = dt_p.date()
+                    except Exception as e_parse:
+                        st.warning(f"Erro ao ler vencimento: {e_parse}")
+
+                    if venc_ath is not None:
+                        # proximo_vencimento retorna sempre data futura.
+                        # Precisamos checar se o ciclo DO MÊS ATUAL está pago.
+                        # Se status != "pago", calculamos dias em relação ao vencimento
+                        # deste mês (que pode já ter passado).
+                        import calendar as _cal
+                        hoje_ath = agora_brasilia_naive().date()
+                        if venc_str_ath.isdigit():
+                            dia_n = int(venc_str_ath)
+                            ult_dia_mes = _cal.monthrange(hoje_ath.year, hoje_ath.month)[1]
+                            venc_este_mes = hoje_ath.replace(day=min(dia_n, ult_dia_mes))
+                            # dias em relação ao vencimento deste mês (negativo = passou)
+                            dias_ath = (venc_este_mes - hoje_ath).days
                         else:
-                            venc_ath = parsear_data(pd.Series([venc_str_ath])).iloc[0].date()
-                        dias_ath = (venc_ath - hoje_ath).days
+                            dias_ath = (venc_ath - hoje_ath).days
                         pix_info_red = f"<p style='color:#f87171;font-family:Inter;font-size:12px;margin:6px 0 0;'>Chave Pix: <b>{pix_ath}</b></p>" if pix_ath and pix_ath.lower() != "nan" else ""
                         pix_info_yel = f"<p style='color:#F9C03D;font-family:Inter;font-size:12px;margin:6px 0 0;'>Chave Pix: <b>{pix_ath}</b></p>" if pix_ath and pix_ath.lower() != "nan" else ""
 
@@ -1491,10 +1513,8 @@ else:
                                     </div>
                                 </div>
                             """, unsafe_allow_html=True)
-                    except:
-                        pass
-        except:
-            pass
+        except Exception as e_pag:
+            pass  # pagamentos não cadastrados — silencioso
 
         # ---- STREAK ----
         streak = calcular_streak(historico_geral, st.session_state.email)
