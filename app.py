@@ -108,6 +108,16 @@ def agora_brasilia_naive() -> datetime:
     """Retorna datetime atual no fuso de Brasilia sem tzinfo."""
     return (datetime.now(timezone.utc) - timedelta(hours=3)).replace(tzinfo=None)
 
+def limpar_pix(valor: str) -> str:
+    """Remove .0 que o pandas adiciona ao ler números da planilha."""
+    v = str(valor).strip()
+    if v.lower() in ("nan", "none", ""):
+        return ""
+    # Remove sufixo .0 de valores numéricos (ex: "11999999999.0" -> "11999999999")
+    if v.endswith(".0") and v[:-2].lstrip("+-").isdigit():
+        return v[:-2]
+    return v
+
 def proximo_vencimento(dia_venc: int) -> 'datetime.date':
     """Calcula a próxima data de vencimento com base no dia do mês.
     Se o dia já passou este mês, retorna o mesmo dia do próximo mês."""
@@ -1258,7 +1268,7 @@ else:
                     pag_aluno = df_pag[df_pag["email_aluno"] == email_vinculado] if not df_pag.empty else pd.DataFrame()
                     valor_atual = str(pag_aluno.iloc[-1].get("valor","")) if not pag_aluno.empty else ""
                     venc_atual  = str(pag_aluno.iloc[-1].get("vencimento","")) if not pag_aluno.empty else ""
-                    pix_atual   = str(pag_aluno.iloc[-1].get("chave_pix","")) if not pag_aluno.empty else ""
+                    pix_atual   = limpar_pix(pag_aluno.iloc[-1].get("chave_pix","")) if not pag_aluno.empty else ""
                     status_atual = str(pag_aluno.iloc[-1].get("status","pendente")) if not pag_aluno.empty else "pendente"
 
                     # Extrai dia do mês do vencimento salvo
@@ -1449,7 +1459,7 @@ else:
                     venc_str_ath = str(row_pag.get("vencimento","")).strip()
                     status_ath   = str(row_pag.get("status","")).strip().lower()
                     valor_ath    = str(row_pag.get("valor","")).strip()
-                    pix_ath      = str(row_pag.get("chave_pix","")).strip()
+                    pix_ath      = limpar_pix(row_pag.get("chave_pix",""))
                     hoje_ath     = agora_brasilia_naive().date()
 
                     # Parse do vencimento
