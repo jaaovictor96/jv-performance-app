@@ -114,19 +114,29 @@ def proximo_vencimento(dia_venc: int) -> 'datetime.date':
     import calendar
     hoje = agora_brasilia_naive().date()
     ano, mes = hoje.year, hoje.month
-    # Ajusta dia para o máximo do mês (ex: dia 31 em fevereiro → dia 28)
     ultimo_dia = calendar.monthrange(ano, mes)[1]
     dia_ajustado = min(dia_venc, ultimo_dia)
     venc_este_mes = hoje.replace(day=dia_ajustado)
     if venc_este_mes >= hoje:
         return venc_este_mes
-    # Já passou — próximo mês
     if mes == 12:
         ano, mes = ano + 1, 1
     else:
         mes += 1
     ultimo_dia_prox = calendar.monthrange(ano, mes)[1]
     return hoje.replace(year=ano, month=mes, day=min(dia_venc, ultimo_dia_prox))
+
+def proximo_vencimento_futuro(dia_venc: int) -> 'datetime.date':
+    """Sempre retorna o vencimento do PRÓXIMO mês — usado quando o mês atual já foi pago."""
+    import calendar
+    hoje = agora_brasilia_naive().date()
+    ano, mes = hoje.year, hoje.month
+    if mes == 12:
+        ano, mes = ano + 1, 1
+    else:
+        mes += 1
+    ultimo_dia = calendar.monthrange(ano, mes)[1]
+    return hoje.replace(year=ano, month=mes, day=min(dia_venc, ultimo_dia))
 
 def parsear_data(series: pd.Series) -> pd.Series:
     """Parseia datas em formato misto (dd/mm/YYYY ou dd/mm/YYYY HH:MM) de forma robusta."""
@@ -1207,7 +1217,7 @@ else:
                                     if _m and 1 <= int(float(venc_str_clean.replace(",","."))) <= 28:
                                         dia_v = int(float(venc_str_clean.replace(",",".")))
                                         if status_u == "pago":
-                                            venc_dt = proximo_vencimento(dia_v)
+                                            venc_dt = proximo_vencimento_futuro(dia_v)
                                         else:
                                             _ult = _cal2.monthrange(hoje_pag.year, hoje_pag.month)[1]
                                             venc_dt = hoje_pag.replace(day=min(dia_v, _ult))
@@ -1466,7 +1476,7 @@ else:
 
                         if status_ath == "pago":
                             # Mostra próximo vencimento
-                            prox_venc = proximo_vencimento(int(float(str(venc_str_ath).replace(",",".")))) if venc_ath is not None else venc_ath
+                            prox_venc = proximo_vencimento_futuro(int(float(str(venc_str_ath).replace(",",".")))) if venc_ath is not None else venc_ath
                             dias_prox = (prox_venc - hoje_ath).days
                             if dias_prox <= 5:
                                 st.markdown(f"""
