@@ -1200,10 +1200,18 @@ else:
                                 status_u = str(row_p.get("status","")).strip().lower()
                                 venc_str = str(row_p.get("vencimento","")).strip()
                                 try:
+                                    import re as _re
+                                    import calendar as _cal2
                                     venc_str_clean = str(venc_str).strip()
-                                    if venc_str_clean.isdigit() and int(venc_str_clean) > 0:
-                                        venc_dt = proximo_vencimento(int(venc_str_clean))
-                                    elif venc_str_clean and venc_str_clean.lower() != "nan":
+                                    _m = _re.match(r'^\.?(\d+)', venc_str_clean.replace(",","."))
+                                    if _m and 1 <= int(float(venc_str_clean.replace(",","."))) <= 28:
+                                        dia_v = int(float(venc_str_clean.replace(",",".")))
+                                        if status_u == "pago":
+                                            venc_dt = proximo_vencimento(dia_v)
+                                        else:
+                                            _ult = _cal2.monthrange(hoje_pag.year, hoje_pag.month)[1]
+                                            venc_dt = hoje_pag.replace(day=min(dia_v, _ult))
+                                    elif venc_str_clean and venc_str_clean.lower() not in ("nan",""):
                                         dt_p = parsear_data(pd.Series([venc_str_clean])).iloc[0]
                                         if pd.isnull(dt_p):
                                             raise ValueError("data inválida")
@@ -1212,7 +1220,9 @@ else:
                                         raise ValueError("sem data")
                                     dias_venc = (venc_dt - hoje_pag).days
                                     if status_u == "pago":
-                                        cor_u, icone_u, label_u = "#4ade80", "🟢", f"Pago — vence {venc_dt.strftime('%d/%m/%Y')}"
+                                        cor_u, icone_u, label_u = "#4ade80", "🟢", f"Pago ✓ — próx. {venc_dt.strftime('%d/%m/%Y')}"
+                                    elif dias_venc <= -3:
+                                        cor_u, icone_u, label_u = "#f87171", "🔴", f"BLOQUEADO — {abs(dias_venc)}d atraso"
                                     elif dias_venc < 0:
                                         cor_u, icone_u, label_u = "#f87171", "🔴", f"ATRASADO {abs(dias_venc)} dia{'s' if abs(dias_venc)>1 else ''}"
                                     elif dias_venc <= 5:
@@ -1220,7 +1230,7 @@ else:
                                     else:
                                         cor_u, icone_u, label_u = "#4ade80", "🟢", f"Em dia — vence {venc_dt.strftime('%d/%m/%Y')}"
                                 except:
-                                    cor_u, icone_u, label_u = "#555", "⚪", "Data inválida"
+                                    cor_u, icone_u, label_u = "#555", "⚪", "Sem vencimento"
                             status_pag_html += (
                                 f"<div style='display:flex;justify-content:space-between;align-items:center;"
                                 f"padding:12px 18px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
@@ -1435,15 +1445,19 @@ else:
                     # Parse do vencimento
                     venc_ath = None
                     try:
-                        if venc_str_ath.isdigit() and int(venc_str_ath) > 0:
-                            venc_ath = proximo_vencimento(int(venc_str_ath))
-                        elif venc_str_ath and venc_str_ath.lower() != "nan":
-                            dt_p = parsear_data(pd.Series([venc_str_ath])).iloc[0]
+                        _v = str(venc_str_ath).replace(",",".")
+                        try:
+                            dia_v_ath = int(float(_v))
+                        except:
+                            dia_v_ath = 0
+                        if 1 <= dia_v_ath <= 28:
+                            venc_ath = proximo_vencimento(dia_v_ath)
+                        elif _v and _v.lower() not in ("nan",""):
+                            dt_p = parsear_data(pd.Series([_v])).iloc[0]
                             if pd.notnull(dt_p):
                                 venc_ath = dt_p.date()
                     except Exception as e_parse:
-                        st.warning(f"Erro ao ler vencimento: {e_parse}")
-
+                        pass
                     if venc_ath is not None:
                         import calendar as _cal
                         hoje_ath = agora_brasilia_naive().date()
@@ -1452,7 +1466,7 @@ else:
 
                         if status_ath == "pago":
                             # Mostra próximo vencimento
-                            prox_venc = proximo_vencimento(int(venc_str_ath)) if venc_str_ath.isdigit() else venc_ath
+                            prox_venc = proximo_vencimento(int(float(str(venc_str_ath).replace(",",".")))) if venc_ath is not None else venc_ath
                             dias_prox = (prox_venc - hoje_ath).days
                             if dias_prox <= 5:
                                 st.markdown(f"""
@@ -1484,8 +1498,11 @@ else:
 
                         else:
                             # Pendente/atrasado — calcula em relação ao vencimento deste mês
-                            if venc_str_ath.isdigit():
-                                dia_n = int(venc_str_ath)
+                            try:
+                                dia_n = int(float(str(venc_str_ath).replace(",",".")))
+                            except:
+                                dia_n = 0
+                            if dia_n:
                                 ult_dia_mes = _cal.monthrange(hoje_ath.year, hoje_ath.month)[1]
                                 venc_ref = hoje_ath.replace(day=min(dia_n, ult_dia_mes))
                             else:
