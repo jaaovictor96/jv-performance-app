@@ -2,4 +2,3 @@ streamlit
 st-gsheets-connection
 pandas
 plotly
-qrcode[pil]
