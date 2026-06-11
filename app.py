@@ -1567,39 +1567,20 @@ else:
                                         Regularize seu pagamento para continuar acessando o app.</p>
                                     </div>
                                 """, unsafe_allow_html=True)
-                                # QR Code Pix
+                                # Chave Pix com botão copiar nativo
                                 if pix_ath and pix_ath.lower() not in ("nan", ""):
-                                    try:
-                                        import qrcode, io
-                                        pix_payload = pix_ath.strip()
-                                        qr = qrcode.QRCode(version=1, box_size=6, border=3)
-                                        qr.add_data(pix_payload)
-                                        qr.make(fit=True)
-                                        img = qr.make_image(fill_color="black", back_color="white")
-                                        buf = io.BytesIO()
-                                        img.save(buf, format="PNG")
-                                        buf.seek(0)
-                                        col_qr_l, col_qr, col_qr_r = st.columns([1, 2, 1])
-                                        with col_qr:
-                                            st.image(buf, caption=f"Pix: {pix_ath} — R$ {valor_ath}", use_container_width=True)
-                                    except ImportError:
-                                        st.markdown(f"""
-                                            <div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);
-                                            border-radius:12px;padding:14px;text-align:center;margin-bottom:16px;'>
-                                                <p style='color:#f87171;font-family:Inter;font-size:12px;margin:0 0 4px;'>Chave Pix</p>
-                                                <p style='color:#fff;font-family:Inter;font-size:15px;font-weight:700;margin:0;'>{pix_ath}</p>
-                                                <p style='color:#aaa;font-family:Inter;font-size:11px;margin:6px 0 0;'>R$ {valor_ath}</p>
-                                            </div>
-                                        """, unsafe_allow_html=True)
-                                    except Exception:
-                                        st.markdown(f"""
-                                            <div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);
-                                            border-radius:12px;padding:14px;text-align:center;margin-bottom:16px;'>
-                                                <p style='color:#f87171;font-family:Inter;font-size:12px;margin:0 0 4px;'>Chave Pix</p>
-                                                <p style='color:#fff;font-family:Inter;font-size:15px;font-weight:700;margin:0;'>{pix_ath}</p>
-                                                <p style='color:#aaa;font-family:Inter;font-size:11px;margin:6px 0 0;'>R$ {valor_ath}</p>
-                                            </div>
-                                        """, unsafe_allow_html=True)
+                                    st.markdown(f"""
+                                        <div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);
+                                        border-radius:14px;padding:16px 18px;text-align:center;margin-bottom:12px;'>
+                                            <p style='color:#f87171;font-family:Inter;font-size:9px;font-weight:700;
+                                            letter-spacing:2px;text-transform:uppercase;margin:0 0 6px;'>Pagar via Pix</p>
+                                            <p style='color:#aaa;font-family:Inter;font-size:11px;margin:0 0 10px;'>
+                                            Valor: <b style='color:#fff;'>R$ {valor_ath}</b></p>
+                                            <p style='color:#aaa;font-family:Inter;font-size:10px;margin:0;'>
+                                            Copie a chave abaixo 👇</p>
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                                    st.code(pix_ath, language=None)
                                 st.stop()
 
                             elif dias_ath < 0:
