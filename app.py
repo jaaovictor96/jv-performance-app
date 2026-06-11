@@ -834,10 +834,11 @@ else:
             if "coach_aba" not in st.session_state:
                 st.session_state.coach_aba = "graficos"
 
-            ca1, ca2, ca3, ca4, ca5, ca6 = st.columns(6)
+            ca1, ca2, ca3, ca4, ca5, ca6, ca7 = st.columns(7)
             for key, label, col in [("graficos","📊 Graficos",ca1),("checkins","📋 Check-ins",ca2),
                                      ("treinos","🏋 Treinos",ca3),("mensagens","📣 Mensagens",ca4),
-                                     ("dieta","🥗 Dieta",ca5),("pagamentos","💰 Pagamentos",ca6)]:
+                                     ("dieta","🥗 Dieta",ca5),("pagamentos","💰 Pagamentos",ca6),
+                                     ("relatorio","📄 Relatório",ca7)]:
                 with col:
                     ativo = st.session_state.coach_aba == key
                     if ativo:
@@ -1430,6 +1431,229 @@ else:
                 except Exception as e:
                     st.error(f"Erro pagamentos: {e}")
 
+
+
+
+            elif st.session_state.coach_aba == "relatorio":
+                try:
+                    from reportlab.lib.pagesizes import A4
+                    from reportlab.lib import colors
+                    from reportlab.lib.units import cm
+                    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+                    from reportlab.lib.styles import ParagraphStyle
+                    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+                    import io as _io
+                    import calendar as _cal_rel
+
+                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:16px;'>📄 RELATÓRIO MENSAL</p>", unsafe_allow_html=True)
+
+                    # Seleção de mês
+                    hoje_rel = agora_brasilia_naive().date()
+                    meses_opts = []
+                    for i in range(6):
+                        mes_d = (hoje_rel.replace(day=1) - pd.DateOffset(months=i)).date()
+                        meses_opts.append(mes_d)
+                    meses_labels = [f"{_cal_rel.month_name[m.month].capitalize()}/{m.year}" for m in meses_opts]
+                    mes_sel_label = st.selectbox("Mês de referência", meses_labels, key="rel_mes_sel")
+                    mes_sel = meses_opts[meses_labels.index(mes_sel_label)]
+                    mes_inicio = mes_sel.replace(day=1)
+                    mes_fim    = mes_sel.replace(day=_cal_rel.monthrange(mes_sel.year, mes_sel.month)[1])
+
+                    st.markdown(f"<p style='color:#aaa;font-family:Inter;font-size:12px;margin-bottom:16px;'>Gerando relatório de <b style='color:#fff;'>{nome_sel}</b> — {mes_sel_label}</p>", unsafe_allow_html=True)
+
+                    if st.button("📄 Gerar e Baixar PDF", key="btn_gerar_pdf", use_container_width=True):
+                        with st.spinner("Gerando relatório..."):
+
+                            # ── COLETA DE DADOS ──────────────────────────────────
+                            # Registros (cargas)
+                            df_reg = ler_sem_cache("registros")
+                            df_reg["email_aluno"] = df_reg["email_aluno"].astype(str).str.strip().str.lower()
+                            df_reg["data_dt"] = parsear_data(df_reg["data"]).dt.date
+                            df_reg_aluno = df_reg[
+                                (df_reg["email_aluno"] == email_vinculado) &
+                                (df_reg["data_dt"] >= mes_inicio) &
+                                (df_reg["data_dt"] <= mes_fim)
+                            ].copy()
+
+                            # Checkins (peso)
+                            df_ci_rel = ler_sem_cache("checkins")
+                            df_ci_rel["email"] = df_ci_rel["email"].astype(str).str.strip().str.lower()
+                            df_ci_rel["data_dt"] = parsear_data(df_ci_rel["data"]).dt.date
+                            df_ci_aluno = df_ci_rel[
+                                (df_ci_rel["email"] == email_vinculado) &
+                                (df_ci_rel["data_dt"] >= mes_inicio) &
+                                (df_ci_rel["data_dt"] <= mes_fim)
+                            ].copy().sort_values("data_dt")
+
+                            # Frequência (dias únicos com treino)
+                            dias_treino = df_reg_aluno["data_dt"].nunique() if not df_reg_aluno.empty else 0
+                            dias_uteis  = sum(1 for d in range((mes_fim - mes_inicio).days + 1)
+                                              if (mes_inicio + pd.Timedelta(days=d)).weekday() < 5)
+
+                            # Peso início/fim do mês
+                            peso_inicial = float(df_ci_aluno.iloc[0]["peso"])  if not df_ci_aluno.empty else None
+                            peso_final   = float(df_ci_aluno.iloc[-1]["peso"]) if not df_ci_aluno.empty else None
+
+                            # Evolução de cargas por exercício
+                            cargas_evolucao = []
+                            if not df_reg_aluno.empty and "exercicio" in df_reg_aluno.columns:
+                                df_reg_aluno["carga"] = pd.to_numeric(df_reg_aluno["carga"], errors="coerce")
+                                for ex, grp in df_reg_aluno.groupby("exercicio"):
+                                    grp_s = grp.sort_values("data_dt")
+                                    c_ini = grp_s.iloc[0]["carga"]
+                                    c_fim = grp_s.iloc[-1]["carga"]
+                                    if pd.notnull(c_ini) and pd.notnull(c_fim):
+                                        cargas_evolucao.append({
+                                            "exercicio": str(ex),
+                                            "carga_ini": c_ini,
+                                            "carga_fim": c_fim,
+                                            "delta": c_fim - c_ini
+                                        })
+                                cargas_evolucao.sort(key=lambda x: x["delta"], reverse=True)
+
+                            # Feedbacks do mês
+                            feedbacks = []
+                            if not df_ci_aluno.empty:
+                                for _, fb_row in df_ci_aluno.iterrows():
+                                    fb_txt = str(fb_row.get("feedback","")).strip()
+                                    if fb_txt and fb_txt.lower() not in ("nan",""):
+                                        feedbacks.append((fb_row["data_dt"].strftime("%d/%m"), fb_txt))
+
+                            # ── GERAÇÃO DO PDF ───────────────────────────────────
+                            buf_pdf = _io.BytesIO()
+                            doc = SimpleDocTemplate(
+                                buf_pdf, pagesize=A4,
+                                leftMargin=2*cm, rightMargin=2*cm,
+                                topMargin=2*cm, bottomMargin=2*cm
+                            )
+
+                            GOLD   = colors.HexColor("#F9C03D")
+                            DARK   = colors.HexColor("#111111")
+                            GRAY   = colors.HexColor("#888888")
+                            WHITE  = colors.white
+                            GREEN  = colors.HexColor("#4ade80")
+                            RED    = colors.HexColor("#f87171")
+
+                            s_title   = ParagraphStyle("title",   fontName="Helvetica-Bold",   fontSize=22, textColor=GOLD,  spaceAfter=4,  alignment=TA_LEFT)
+                            s_sub     = ParagraphStyle("sub",     fontName="Helvetica",         fontSize=11, textColor=GRAY,  spaceAfter=16, alignment=TA_LEFT)
+                            s_section = ParagraphStyle("section", fontName="Helvetica-Bold",   fontSize=9,  textColor=GOLD,  spaceBefore=14, spaceAfter=6, letterSpacing=2)
+                            s_body    = ParagraphStyle("body",    fontName="Helvetica",         fontSize=10, textColor=WHITE, spaceAfter=4,  leading=15)
+                            s_small   = ParagraphStyle("small",   fontName="Helvetica",         fontSize=8,  textColor=GRAY,  spaceAfter=2)
+                            s_fb      = ParagraphStyle("fb",      fontName="Helvetica-Oblique", fontSize=9,  textColor=GRAY,  spaceAfter=3,  leftIndent=10)
+
+                            story = []
+
+                            # Cabeçalho
+                            story.append(Paragraph("JV PERFORMANCE", s_title))
+                            story.append(Paragraph(f"Relatório Mensal — {mes_sel_label}", s_sub))
+                            story.append(Paragraph(f"Aluno: {nome_sel}", ParagraphStyle("nm", fontName="Helvetica-Bold", fontSize=12, textColor=WHITE, spaceAfter=4)))
+                            story.append(Paragraph(f"Gerado em {hoje_rel.strftime('%d/%m/%Y')}", s_small))
+                            story.append(HRFlowable(width="100%", thickness=1, color=GOLD, spaceAfter=14))
+
+                            # ── FREQUÊNCIA
+                            story.append(Paragraph("FREQUENCIA", s_section))
+                            freq_pct = int((dias_treino / dias_uteis * 100)) if dias_uteis > 0 else 0
+                            freq_cor = GREEN if freq_pct >= 75 else (GOLD if freq_pct >= 50 else RED)
+                            freq_data = [
+                                [Paragraph("Dias treinados", s_body), Paragraph(f"{dias_treino}", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=freq_cor))],
+                                [Paragraph("Dias uteis no mes", s_body), Paragraph(f"{dias_uteis}", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=WHITE))],
+                                [Paragraph("Aproveitamento", s_body), Paragraph(f"{freq_pct}%", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=freq_cor))],
+                            ]
+                            t_freq = Table(freq_data, colWidths=[10*cm, 6*cm])
+                            t_freq.setStyle(TableStyle([
+                                ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#1a1a1a")),
+                                ("ROWBACKGROUNDS", (0,0), (-1,-1), [colors.HexColor("#1a1a1a"), colors.HexColor("#141414")]),
+                                ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#333")),
+                                ("ROUNDEDCORNERS", [6]),
+                                ("TOPPADDING", (0,0), (-1,-1), 7),
+                                ("BOTTOMPADDING", (0,0), (-1,-1), 7),
+                                ("LEFTPADDING", (0,0), (-1,-1), 12),
+                            ]))
+                            story.append(t_freq)
+
+                            # ── PESO
+                            story.append(Paragraph("EVOLUCAO DE PESO", s_section))
+                            if peso_inicial is not None and peso_final is not None:
+                                delta_p = peso_final - peso_inicial
+                                dp_str  = f"{delta_p:+.1f} kg"
+                                dp_cor  = GREEN if delta_p <= 0 else RED
+                                peso_data = [
+                                    [Paragraph("Peso inicial (mes)", s_body), Paragraph(f"{peso_inicial:.1f} kg", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=WHITE))],
+                                    [Paragraph("Peso final (mes)",   s_body), Paragraph(f"{peso_final:.1f} kg",   ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=WHITE))],
+                                    [Paragraph("Variacao",           s_body), Paragraph(dp_str,                   ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=dp_cor))],
+                                ]
+                            else:
+                                peso_data = [[Paragraph("Sem check-ins registrados neste mes.", s_body), Paragraph("", s_body)]]
+                            t_peso = Table(peso_data, colWidths=[10*cm, 6*cm])
+                            t_peso.setStyle(TableStyle([
+                                ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#1a1a1a")),
+                                ("ROWBACKGROUNDS", (0,0), (-1,-1), [colors.HexColor("#1a1a1a"), colors.HexColor("#141414")]),
+                                ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#333")),
+                                ("TOPPADDING", (0,0), (-1,-1), 7),
+                                ("BOTTOMPADDING", (0,0), (-1,-1), 7),
+                                ("LEFTPADDING", (0,0), (-1,-1), 12),
+                            ]))
+                            story.append(t_peso)
+
+                            # ── EVOLUÇÃO DE CARGAS
+                            story.append(Paragraph("EVOLUCAO DE CARGAS", s_section))
+                            if cargas_evolucao:
+                                carga_rows = [[
+                                    Paragraph("Exercicio", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, textColor=GOLD)),
+                                    Paragraph("Inicio", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, textColor=GOLD)),
+                                    Paragraph("Fim", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, textColor=GOLD)),
+                                    Paragraph("Variacao", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, textColor=GOLD)),
+                                ]]
+                                for c in cargas_evolucao[:15]:
+                                    d = c["delta"]
+                                    d_cor = GREEN if d > 0 else (RED if d < 0 else WHITE)
+                                    carga_rows.append([
+                                        Paragraph(c["exercicio"][:35], s_body),
+                                        Paragraph(f"{c['carga_ini']:.1f} kg", s_body),
+                                        Paragraph(f"{c['carga_fim']:.1f} kg", s_body),
+                                        Paragraph(f"{d:+.1f} kg", ParagraphStyle("dv", fontName="Helvetica-Bold", fontSize=10, textColor=d_cor)),
+                                    ])
+                                t_carga = Table(carga_rows, colWidths=[8*cm, 3*cm, 3*cm, 3*cm])
+                                t_carga.setStyle(TableStyle([
+                                    ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#111")),
+                                    ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.HexColor("#1a1a1a"), colors.HexColor("#141414")]),
+                                    ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#333")),
+                                    ("TOPPADDING", (0,0), (-1,-1), 6),
+                                    ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+                                    ("LEFTPADDING", (0,0), (-1,-1), 8),
+                                ]))
+                                story.append(t_carga)
+                            else:
+                                story.append(Paragraph("Nenhum treino registrado neste mes.", s_body))
+
+                            # ── FEEDBACKS
+                            if feedbacks:
+                                story.append(Paragraph("RELATOS DO ALUNO", s_section))
+                                for dt_fb, txt_fb in feedbacks[-5:]:
+                                    story.append(Paragraph(f"<b>{dt_fb}</b> — {txt_fb[:200]}", s_fb))
+
+                            # ── RODAPÉ
+                            story.append(Spacer(1, 0.5*cm))
+                            story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#333"), spaceAfter=6))
+                            story.append(Paragraph(f"JV Performance  •  {mes_sel_label}  •  {nome_sel}", ParagraphStyle("footer", fontName="Helvetica", fontSize=7, textColor=GRAY, alignment=TA_CENTER)))
+
+                            doc.build(story)
+                            buf_pdf.seek(0)
+
+                            nome_arquivo = f"relatorio_{nome_sel.replace(' ','_')}_{mes_sel.strftime('%m_%Y')}.pdf"
+                            st.download_button(
+                                label="⬇️ Baixar Relatório PDF",
+                                data=buf_pdf,
+                                file_name=nome_arquivo,
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
+                            st.success(f"Relatório gerado com sucesso!")
+
+                except Exception as e:
+                    st.error(f"Erro ao gerar relatório: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
 
     # ==========================================================
     # ÁREA DO ATLETA
