@@ -1326,35 +1326,58 @@ else:
                             except Exception as e:
                                 st.error(f"Erro ao salvar: {e}")
 
-                    # Botão PAGO (fora do form) — registra data de hoje automaticamente
+                    # Botão PAGO com confirmação
                     st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
                     col_pago, col_desfazer = st.columns(2)
                     with col_pago:
                         st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
                         if st.button("✓ PAGO", key="btn_marcar_pago", use_container_width=True):
-                            try:
-                                df_pag_full = ler_sem_cache("pagamentos")
-                                try:
-                                    df_pag_full["email_aluno"] = df_pag_full["email_aluno"].astype(str).str.strip().str.lower()
-                                    df_pag_full = df_pag_full[df_pag_full["email_aluno"] != email_vinculado]
-                                except:
-                                    df_pag_full = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
-                                hoje_str = agora_brasilia_naive().strftime("%d/%m/%Y")
-                                nova_linha = pd.DataFrame([{
-                                    "email_aluno": email_vinculado,
-                                    "valor": valor_atual,
-                                    "vencimento": str(int(dia_venc_atual)),
-                                    "status": "pago",
-                                    "data_pagamento": hoje_str,
-                                    "chave_pix": pix_atual
-                                }])
-                                conn.update(worksheet="pagamentos", data=pd.concat([df_pag_full, nova_linha], ignore_index=True))
-                                st.cache_data.clear()
-                                st.toast(f"✅ Pagamento de {nome_sel} registrado em {hoje_str}!", icon="✅")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Erro ao marcar como pago: {e}")
+                            st.session_state["confirmar_pago"] = email_vinculado
                         st.markdown('</div>', unsafe_allow_html=True)
+
+                    # Dialog de confirmação
+                    if st.session_state.get("confirmar_pago") == email_vinculado:
+                        st.markdown(f"""
+                            <div style='background:rgba(74,222,128,0.07);border:1px solid rgba(74,222,128,0.25);
+                            border-radius:14px;padding:16px 18px;margin-top:8px;'>
+                                <p style='color:#4ade80;font-family:Inter;font-size:11px;font-weight:700;
+                                letter-spacing:2px;text-transform:uppercase;margin:0 0 6px;'>Confirmar pagamento</p>
+                                <p style='color:#aaa;font-family:Inter;font-size:13px;margin:0 0 12px;'>
+                                Registrar pagamento de <b style='color:#fff;'>{nome_sel}</b> na data de hoje?</p>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        cc1, cc2 = st.columns(2)
+                        with cc1:
+                            st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+                            if st.button("✓ Confirmar", key="btn_confirmar_pago", use_container_width=True):
+                                try:
+                                    df_pag_full = ler_sem_cache("pagamentos")
+                                    try:
+                                        df_pag_full["email_aluno"] = df_pag_full["email_aluno"].astype(str).str.strip().str.lower()
+                                        df_pag_full = df_pag_full[df_pag_full["email_aluno"] != email_vinculado]
+                                    except:
+                                        df_pag_full = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
+                                    hoje_str = agora_brasilia_naive().strftime("%d/%m/%Y")
+                                    nova_linha = pd.DataFrame([{
+                                        "email_aluno": email_vinculado,
+                                        "valor": valor_atual,
+                                        "vencimento": str(int(dia_venc_atual)),
+                                        "status": "pago",
+                                        "data_pagamento": hoje_str,
+                                        "chave_pix": pix_atual
+                                    }])
+                                    conn.update(worksheet="pagamentos", data=pd.concat([df_pag_full, nova_linha], ignore_index=True))
+                                    st.cache_data.clear()
+                                    st.session_state.pop("confirmar_pago", None)
+                                    st.toast(f"✅ Pagamento de {nome_sel} registrado em {hoje_str}!", icon="✅")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Erro ao marcar como pago: {e}")
+                            st.markdown('</div>', unsafe_allow_html=True)
+                        with cc2:
+                            if st.button("✕ Cancelar", key="btn_cancelar_pago", use_container_width=True):
+                                st.session_state.pop("confirmar_pago", None)
+                                st.rerun()
                     with col_desfazer:
                         if st.button("↩ Desfazer / Pendente", key="btn_desfazer_pago", use_container_width=True):
                             try:
@@ -1540,11 +1563,43 @@ else:
                                         Acesso Bloqueado</p>
                                         <p style='color:#f87171;font-family:Inter;font-size:13px;margin:0 0 6px;'>
                                         Pagamento em atraso há <b>{dias_atraso} dia{'s' if dias_atraso>1 else ''}</b> — R$ {valor_ath}</p>
-                                        <p style='color:#aaa;font-family:Inter;font-size:11px;margin:0;'>
+                                        <p style='color:#aaa;font-family:Inter;font-size:11px;margin:0 0 16px;'>
                                         Regularize seu pagamento para continuar acessando o app.</p>
-                                        {pix_info_red}
                                     </div>
                                 """, unsafe_allow_html=True)
+                                # QR Code Pix
+                                if pix_ath and pix_ath.lower() not in ("nan", ""):
+                                    try:
+                                        import qrcode, io
+                                        pix_payload = pix_ath.strip()
+                                        qr = qrcode.QRCode(version=1, box_size=6, border=3)
+                                        qr.add_data(pix_payload)
+                                        qr.make(fit=True)
+                                        img = qr.make_image(fill_color="black", back_color="white")
+                                        buf = io.BytesIO()
+                                        img.save(buf, format="PNG")
+                                        buf.seek(0)
+                                        col_qr_l, col_qr, col_qr_r = st.columns([1, 2, 1])
+                                        with col_qr:
+                                            st.image(buf, caption=f"Pix: {pix_ath} — R$ {valor_ath}", use_container_width=True)
+                                    except ImportError:
+                                        st.markdown(f"""
+                                            <div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);
+                                            border-radius:12px;padding:14px;text-align:center;margin-bottom:16px;'>
+                                                <p style='color:#f87171;font-family:Inter;font-size:12px;margin:0 0 4px;'>Chave Pix</p>
+                                                <p style='color:#fff;font-family:Inter;font-size:15px;font-weight:700;margin:0;'>{pix_ath}</p>
+                                                <p style='color:#aaa;font-family:Inter;font-size:11px;margin:6px 0 0;'>R$ {valor_ath}</p>
+                                            </div>
+                                        """, unsafe_allow_html=True)
+                                    except Exception:
+                                        st.markdown(f"""
+                                            <div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);
+                                            border-radius:12px;padding:14px;text-align:center;margin-bottom:16px;'>
+                                                <p style='color:#f87171;font-family:Inter;font-size:12px;margin:0 0 4px;'>Chave Pix</p>
+                                                <p style='color:#fff;font-family:Inter;font-size:15px;font-weight:700;margin:0;'>{pix_ath}</p>
+                                                <p style='color:#aaa;font-family:Inter;font-size:11px;margin:6px 0 0;'>R$ {valor_ath}</p>
+                                            </div>
+                                        """, unsafe_allow_html=True)
                                 st.stop()
 
                             elif dias_ath < 0:
