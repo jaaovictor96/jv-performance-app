@@ -1006,7 +1006,7 @@ else:
                             with st.expander(f"{i+1}. {row_ex['exercicio']}", expanded=False):
                                 ce1, ce2, ce3 = st.columns(3)
                                 with ce1:
-                                    novo_nome = st.text_input("Exercicio", value=str(row_ex["exercicio"]), key=f"ex_nome_{i}")
+                                    novo_nome = st.text_input("Exercício", value=str(row_ex["exercicio"]), key=f"ex_nome_{i}")
                                 with ce2:
                                     nova_serie = st.number_input("Series", min_value=1, max_value=20,
                                         value=int(float(row_ex["series"])) if pd.notnull(row_ex.get("series")) else 3, key=f"ex_serie_{i}")
@@ -1070,7 +1070,7 @@ else:
                         with cn1:
                             nome_ficha_nova = st.text_input("Nome da Ficha", placeholder="Ex: Treino A")
                         with cn2:
-                            nome_ex_novo = st.text_input("Exercicio", placeholder="Ex: Supino Reto")
+                            nome_ex_novo = st.text_input("Exercício", placeholder="Ex: Supino Reto")
                         cn3, cn4 = st.columns(2)
                         with cn3:
                             series_novo = st.number_input("Series", min_value=1, max_value=20, value=4)
@@ -1494,22 +1494,31 @@ else:
                             peso_inicial = float(df_ci_aluno.iloc[0]["peso"])  if not df_ci_aluno.empty else None
                             peso_final   = float(df_ci_aluno.iloc[-1]["peso"]) if not df_ci_aluno.empty else None
 
-                            # Evolução de cargas por exercício
-                            cargas_evolucao = []
+                            # Evolução de cargas agrupada por treino
+                            cargas_por_treino = {}  # {treino: [{exercicio, carga_ini, carga_fim, delta}]}
                             if not df_reg_aluno.empty and "exercicio" in df_reg_aluno.columns:
                                 df_reg_aluno["carga"] = pd.to_numeric(df_reg_aluno["carga"], errors="coerce")
-                                for ex, grp in df_reg_aluno.groupby("exercicio"):
+                                treino_col = "treino" if "treino" in df_reg_aluno.columns else None
+                                for (treino_nome, ex), grp in df_reg_aluno.groupby(
+                                    [treino_col if treino_col else df_reg_aluno.index.map(lambda x: "Treino"), "exercicio"]
+                                ):
                                     grp_s = grp.sort_values("data_dt")
                                     c_ini = grp_s.iloc[0]["carga"]
                                     c_fim = grp_s.iloc[-1]["carga"]
                                     if pd.notnull(c_ini) and pd.notnull(c_fim):
-                                        cargas_evolucao.append({
+                                        t_key = str(treino_nome) if treino_col else "Treino"
+                                        if t_key not in cargas_por_treino:
+                                            cargas_por_treino[t_key] = []
+                                        cargas_por_treino[t_key].append({
                                             "exercicio": str(ex),
                                             "carga_ini": c_ini,
                                             "carga_fim": c_fim,
                                             "delta": c_fim - c_ini
                                         })
-                                cargas_evolucao.sort(key=lambda x: x["delta"], reverse=True)
+                                # Ordena exercícios dentro de cada treino por maior evolução
+                                for t in cargas_por_treino:
+                                    cargas_por_treino[t].sort(key=lambda x: x["delta"], reverse=True)
+                            cargas_evolucao = [ex for lst in cargas_por_treino.values() for ex in lst]
 
                             # Feedbacks do mês
                             feedbacks = []
@@ -1544,19 +1553,38 @@ else:
                             story = []
 
                             # Cabeçalho
-                            story.append(Paragraph("JV PERFORMANCE", s_title))
-                            story.append(Paragraph(f"Relatório Mensal — {mes_sel_label}", s_sub))
-                            story.append(Paragraph(f"Aluno: {nome_sel}", ParagraphStyle("nm", fontName="Helvetica-Bold", fontSize=12, textColor=WHITE, spaceAfter=4)))
-                            story.append(Paragraph(f"Gerado em {hoje_rel.strftime('%d/%m/%Y')}", s_small))
-                            story.append(HRFlowable(width="100%", thickness=1, color=GOLD, spaceAfter=14))
+                            s_header_right = ParagraphStyle("hr", fontName="Helvetica", fontSize=9, textColor=GRAY, alignment=TA_RIGHT, leading=14)
+                            cab_table = Table([
+                                [
+                                    Paragraph("JV PERFORMANCE", s_title),
+                                    Paragraph(f"Gerado em {hoje_rel.strftime('%d/%m/%Y')}", s_header_right),
+                                ],
+                                [
+                                    Paragraph(f"Relatório Mensal — {mes_sel_label}", ParagraphStyle("sub2", fontName="Helvetica", fontSize=11, textColor=GRAY)),
+                                    Paragraph("", s_small),
+                                ],
+                                [
+                                    Paragraph(f"Aluno: {nome_sel}", ParagraphStyle("nm", fontName="Helvetica-Bold", fontSize=12, textColor=WHITE)),
+                                    Paragraph("", s_small),
+                                ],
+                            ], colWidths=[13*cm, 4*cm])
+                            cab_table.setStyle(TableStyle([
+                                ("VALIGN", (0,0), (-1,-1), "TOP"),
+                                ("LEFTPADDING", (0,0), (-1,-1), 0),
+                                ("RIGHTPADDING", (0,0), (-1,-1), 0),
+                                ("TOPPADDING", (0,0), (-1,-1), 0),
+                                ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+                            ]))
+                            story.append(cab_table)
+                            story.append(HRFlowable(width="100%", thickness=1, color=GOLD, spaceBefore=6, spaceAfter=14))
 
                             # ── FREQUÊNCIA
-                            story.append(Paragraph("FREQUENCIA", s_section))
+                            story.append(Paragraph("FREQUÊNCIA", s_section))
                             freq_pct = int((dias_treino / dias_uteis * 100)) if dias_uteis > 0 else 0
                             freq_cor = GREEN if freq_pct >= 75 else (GOLD if freq_pct >= 50 else RED)
                             freq_data = [
                                 [Paragraph("Dias treinados", s_body), Paragraph(f"{dias_treino}", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=freq_cor))],
-                                [Paragraph("Dias uteis no mes", s_body), Paragraph(f"{dias_uteis}", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=WHITE))],
+                                [Paragraph("Dias úteis no mês", s_body), Paragraph(f"{dias_uteis}", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=WHITE))],
                                 [Paragraph("Aproveitamento", s_body), Paragraph(f"{freq_pct}%", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=freq_cor))],
                             ]
                             t_freq = Table(freq_data, colWidths=[10*cm, 6*cm])
@@ -1572,18 +1600,18 @@ else:
                             story.append(t_freq)
 
                             # ── PESO
-                            story.append(Paragraph("EVOLUCAO DE PESO", s_section))
+                            story.append(Paragraph("EVOLUÇÃO DE PESO", s_section))
                             if peso_inicial is not None and peso_final is not None:
                                 delta_p = peso_final - peso_inicial
                                 dp_str  = f"{delta_p:+.1f} kg"
                                 dp_cor  = GREEN if delta_p <= 0 else RED
                                 peso_data = [
-                                    [Paragraph("Peso inicial (mes)", s_body), Paragraph(f"{peso_inicial:.1f} kg", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=WHITE))],
-                                    [Paragraph("Peso final (mes)",   s_body), Paragraph(f"{peso_final:.1f} kg",   ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=WHITE))],
-                                    [Paragraph("Variacao",           s_body), Paragraph(dp_str,                   ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=dp_cor))],
+                                    [Paragraph("Peso inicial (mês)", s_body), Paragraph(f"{peso_inicial:.1f} kg", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=WHITE))],
+                                    [Paragraph("Peso final (mês)",   s_body), Paragraph(f"{peso_final:.1f} kg",   ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=WHITE))],
+                                    [Paragraph("Variação",           s_body), Paragraph(dp_str,                   ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=dp_cor))],
                                 ]
                             else:
-                                peso_data = [[Paragraph("Sem check-ins registrados neste mes.", s_body), Paragraph("", s_body)]]
+                                peso_data = [[Paragraph("Sem check-ins registrados neste mês.", s_body), Paragraph("", s_body)]]
                             t_peso = Table(peso_data, colWidths=[10*cm, 6*cm])
                             t_peso.setStyle(TableStyle([
                                 ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#1a1a1a")),
@@ -1596,35 +1624,42 @@ else:
                             story.append(t_peso)
 
                             # ── EVOLUÇÃO DE CARGAS
-                            story.append(Paragraph("EVOLUCAO DE CARGAS", s_section))
-                            if cargas_evolucao:
-                                carga_rows = [[
-                                    Paragraph("Exercicio", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, textColor=GOLD)),
-                                    Paragraph("Inicio", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, textColor=GOLD)),
-                                    Paragraph("Fim", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, textColor=GOLD)),
-                                    Paragraph("Variacao", ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, textColor=GOLD)),
-                                ]]
-                                for c in cargas_evolucao[:15]:
-                                    d = c["delta"]
-                                    d_cor = GREEN if d > 0 else (RED if d < 0 else WHITE)
-                                    carga_rows.append([
-                                        Paragraph(c["exercicio"][:35], s_body),
-                                        Paragraph(f"{c['carga_ini']:.1f} kg", s_body),
-                                        Paragraph(f"{c['carga_fim']:.1f} kg", s_body),
-                                        Paragraph(f"{d:+.1f} kg", ParagraphStyle("dv", fontName="Helvetica-Bold", fontSize=10, textColor=d_cor)),
-                                    ])
-                                t_carga = Table(carga_rows, colWidths=[8*cm, 3*cm, 3*cm, 3*cm])
-                                t_carga.setStyle(TableStyle([
-                                    ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#111")),
-                                    ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.HexColor("#1a1a1a"), colors.HexColor("#141414")]),
-                                    ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#333")),
-                                    ("TOPPADDING", (0,0), (-1,-1), 6),
-                                    ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-                                    ("LEFTPADDING", (0,0), (-1,-1), 8),
-                                ]))
-                                story.append(t_carga)
+                            story.append(Paragraph("EVOLUÇÃO DE CARGAS", s_section))
+                            s_treino_titulo = ParagraphStyle("tt", fontName="Helvetica-Bold", fontSize=9,
+                                textColor=WHITE, spaceBefore=10, spaceAfter=4,
+                                backColor=colors.HexColor("#222222"), leftIndent=0)
+                            s_th = ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, textColor=GOLD)
+                            if cargas_por_treino:
+                                for treino_nome, exercicios in cargas_por_treino.items():
+                                    # Subtítulo do treino
+                                    story.append(Paragraph(f"  {treino_nome.upper()}", s_treino_titulo))
+                                    carga_rows = [[
+                                        Paragraph("Exercício", s_th),
+                                        Paragraph("Início",   s_th),
+                                        Paragraph("Fim",      s_th),
+                                        Paragraph("Variação", s_th),
+                                    ]]
+                                    for c in exercicios:
+                                        d = c["delta"]
+                                        d_cor = GREEN if d > 0 else (RED if d < 0 else GRAY)
+                                        carga_rows.append([
+                                            Paragraph(c["exercicio"][:38], s_body),
+                                            Paragraph(f"{c['carga_ini']:.1f} kg", s_body),
+                                            Paragraph(f"{c['carga_fim']:.1f} kg", s_body),
+                                            Paragraph(f"{d:+.1f} kg", ParagraphStyle("dv", fontName="Helvetica-Bold", fontSize=10, textColor=d_cor)),
+                                        ])
+                                    t_carga = Table(carga_rows, colWidths=[8*cm, 3*cm, 3*cm, 3*cm])
+                                    t_carga.setStyle(TableStyle([
+                                        ("BACKGROUND",    (0,0), (-1,0),  colors.HexColor("#111111")),
+                                        ("ROWBACKGROUNDS",(0,1), (-1,-1), [colors.HexColor("#1a1a1a"), colors.HexColor("#141414")]),
+                                        ("GRID",          (0,0), (-1,-1), 0.3, colors.HexColor("#333")),
+                                        ("TOPPADDING",    (0,0), (-1,-1), 6),
+                                        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+                                        ("LEFTPADDING",   (0,0), (-1,-1), 8),
+                                    ]))
+                                    story.append(t_carga)
                             else:
-                                story.append(Paragraph("Nenhum treino registrado neste mes.", s_body))
+                                story.append(Paragraph("Nenhum treino registrado neste mês.", s_body))
 
                             # ── FEEDBACKS
                             if feedbacks:
