@@ -793,10 +793,10 @@ else:
 
             # ABAS
             if "coach_aba" not in st.session_state:
-                st.session_state.coach_aba = "graficos"
+                st.session_state.coach_aba = "evolucao_coach"
 
             ca1, ca2, ca3, ca4, ca5, ca6, ca7 = st.columns(7)
-            for key, label, col in [("graficos","📊 Graficos",ca1),("checkins","📋 Check-ins",ca2),
+            for key, label, col in [("evolucao_coach","📈 Evolução",ca1),("checkins","📋 Check-ins",ca2),
                                      ("treinos","🏋 Treinos",ca3),("mensagens","📣 Mensagens",ca4),
                                      ("dieta","🥗 Dieta",ca5),("pagamentos","💰 Pagamentos",ca6),
                                      ("relatorio","📄 Relatório",ca7)]:
@@ -812,54 +812,168 @@ else:
 
             st.markdown("---")
 
-            # ABA GRAFICOS
-            if st.session_state.coach_aba == "graficos":
+            # ABA EVOLUÇÃO (COACH)
+            if st.session_state.coach_aba == "evolucao_coach":
                 if df_coach.empty:
                     st.info(f"{nome_sel} ainda nao registrou treinos.")
                 else:
                     df_coach["email_aluno"] = df_coach["email_aluno"].astype(str).str.strip().str.lower()
-                    df_aluno = df_coach[df_coach["email_aluno"] == email_vinculado].copy()
-                    if df_aluno.empty:
+                    df_aluno_ev = df_coach[df_coach["email_aluno"] == email_vinculado].copy()
+                    if df_aluno_ev.empty:
                         st.info(f"{nome_sel} ainda nao registrou treinos.")
                     else:
-                        df_aluno["data"] = parsear_data(df_aluno["data"])
-                        df_aluno = df_aluno.dropna(subset=["data"])
+                        df_aluno_ev["data"] = parsear_data(df_aluno_ev["data"])
+                        df_aluno_ev = df_aluno_ev.dropna(subset=["data"])
+                        df_aluno_ev["data_date"] = df_aluno_ev["data"].dt.date
 
-                        # Filtros: período + treino
-                        col_per, col_tr = st.columns(2)
-                        with col_per:
-                            periodo = st.selectbox("Periodo:", ["Ultimas 4 semanas","Ultimo mes","Ultimos 3 meses","Tudo"], key="coach_periodo")
-                        hoje_dt = pd.Timestamp(hoje_ref)
-                        if periodo == "Ultimas 4 semanas":   corte = hoje_dt - pd.Timedelta(weeks=4)
-                        elif periodo == "Ultimo mes":         corte = hoje_dt - pd.Timedelta(days=30)
-                        elif periodo == "Ultimos 3 meses":    corte = hoje_dt - pd.Timedelta(days=90)
-                        else:                                 corte = pd.Timestamp("2000-01-01")
-                        df_p = df_aluno[df_aluno["data"] >= corte]
+                        # RECORDES PESSOAIS
+                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>🏆 Recordes Pessoais</p>", unsafe_allow_html=True)
+                        prs_c = df_aluno_ev.groupby("exercicio").agg(
+                            carga_max=("carga", "max"),
+                            ultima_data=("data", "max")
+                        ).reset_index().sort_values("carga_max", ascending=False)
+                        pr_html_c = "<div style='background:rgba(28,27,27,0.9);border-radius:14px;overflow:hidden;margin-bottom:20px;'>"
+                        for _, r in prs_c.iterrows():
+                            pr_html_c += (
+                                f"<div class='pr-row'>"
+                                f"<div><div class='pr-nome'>{r['exercicio']}</div>"
+                                f"<div class='pr-data'>{r['ultima_data'].strftime('%d/%m/%Y')}</div></div>"
+                                f"<div class='pr-carga'>{r['carga_max']:.1f} kg</div></div>"
+                            )
+                        pr_html_c += "</div>"
+                        st.markdown(pr_html_c, unsafe_allow_html=True)
 
-                        # Filtro por treino — só aparece se houver coluna "treino"
-                        if "treino" in df_p.columns:
-                            treinos_disp = df_p["treino"].dropna().unique().tolist()
-                            with col_tr:
-                                treino_sel = st.selectbox("Treino:", ["Todos"] + treinos_disp, key="coach_treino_sel")
-                            if treino_sel != "Todos":
-                                df_p = df_p[df_p["treino"] == treino_sel]
+                        # CALENDÁRIO DE TREINOS
+                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📅 Calendário de Treinos</p>", unsafe_allow_html=True)
 
-                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>PROGRESSAO DE CARGA</p>", unsafe_allow_html=True)
-                        exercicios_disp = df_p["exercicio"].dropna().unique().tolist()
-                        if not exercicios_disp:
-                            st.info("Nenhum exercicio encontrado para os filtros selecionados.")
+                        if "coach_ev_cal_mes" not in st.session_state:
+                            st.session_state.coach_ev_cal_mes = agora_brasilia_naive().replace(day=1)
+
+                        cp1, cp2, cp3 = st.columns([1, 3, 1])
+                        with cp1:
+                            if st.button("←", key="coach_ev_cal_prev", use_container_width=True):
+                                st.session_state.coach_ev_cal_mes = (st.session_state.coach_ev_cal_mes - timedelta(days=1)).replace(day=1)
+                                st.rerun()
+                        with cp2:
+                            st.markdown(
+                                f"<p style='text-align:center;color:#ccc;font-family:Inter;font-size:13px;font-weight:600;letter-spacing:1px;margin:10px 0;'>"
+                                f"{st.session_state.coach_ev_cal_mes.strftime('%B %Y').upper()}</p>",
+                                unsafe_allow_html=True
+                            )
+                        with cp3:
+                            if st.session_state.coach_ev_cal_mes < agora_brasilia_naive().replace(day=1):
+                                if st.button("→", key="coach_ev_cal_next", use_container_width=True):
+                                    st.session_state.coach_ev_cal_mes = (st.session_state.coach_ev_cal_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
+                                    st.rerun()
+
+                        import calendar as cal_lib_ev
+                        mes_ref_ev = st.session_state.coach_ev_cal_mes
+                        ano_ev, mes_ev = mes_ref_ev.year, mes_ref_ev.month
+                        prim_sem_ev = mes_ref_ev.weekday()
+                        total_dias_ev = cal_lib_ev.monthrange(ano_ev, mes_ev)[1]
+
+                        vol_dia_ev = {}
+                        for _, rh in df_aluno_ev.iterrows():
+                            d = rh["data_date"]
+                            if d.year == ano_ev and d.month == mes_ev:
+                                vol_dia_ev[d.day] = vol_dia_ev.get(d.day, 0) + float(rh.get("carga", 0))
+
+                        max_v_ev = max(vol_dia_ev.values()) if vol_dia_ev else 1
+                        nomes_sem_ev = ["SEG","TER","QUA","QUI","SEX","SAB","DOM"]
+                        ce = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;padding:16px;margin-bottom:16px;border:1px solid rgba(255,255,255,0.05);'>"
+                        ce += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:8px;'>"
+                        for n in nomes_sem_ev:
+                            ce += f"<div style='text-align:center;color:#333;font-family:Inter;font-size:9px;letter-spacing:1px;font-weight:600;'>{n}</div>"
+                        ce += "</div><div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;'>"
+                        for _ in range(prim_sem_ev):
+                            ce += "<div></div>"
+                        hoje_d_ev = agora_brasilia_naive().date()
+                        for dia_ev in range(1, total_dias_ev + 1):
+                            data_d_ev = datetime(ano_ev, mes_ev, dia_ev).date()
+                            v_ev = vol_dia_ev.get(dia_ev, 0)
+                            is_hj_ev = data_d_ev == hoje_d_ev
+                            if v_ev > 0:
+                                inten_ev = v_ev / max_v_ev
+                                op_ev = 0.3 + 0.7 * inten_ev
+                                bg_ev = f"rgba(249,192,61,{op_ev:.2f})"
+                                ct_ev = "#0A0A0A" if inten_ev > 0.5 else "#F9C03D"
+                                bd_ev = "1px solid rgba(249,192,61,0.5)"
+                            else:
+                                bg_ev, ct_ev, bd_ev = "rgba(255,255,255,0.03)", "#333", "1px solid rgba(255,255,255,0.04)"
+                            anel_ev = "box-shadow:0 0 0 2px #F9C03D;" if is_hj_ev else ""
+                            ce += (f"<div style='aspect-ratio:1;display:flex;align-items:center;justify-content:center;"
+                                   f"border-radius:8px;background:{bg_ev};border:{bd_ev};{anel_ev}"
+                                   f"font-family:Space Grotesk;font-size:11px;font-weight:700;color:{ct_ev};'>{dia_ev}</div>")
+                        ce += ("</div><div style='display:flex;align-items:center;gap:8px;margin-top:12px;"
+                               "padding-top:10px;border-top:1px solid rgba(255,255,255,0.04);'>"
+                               "<div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,0.3);'></div>"
+                               "<span style='color:#444;font-family:Inter;font-size:9px;'>Volume baixo</span>"
+                               "<div style='width:10px;height:10px;border-radius:3px;background:#F9C03D;margin-left:8px;'></div>"
+                               "<span style='color:#444;font-family:Inter;font-size:9px;'>Volume alto</span></div></div>")
+                        st.markdown(ce, unsafe_allow_html=True)
+
+                        # DETALHE DO DIA
+                        dias_treinados_ev = sorted(vol_dia_ev.keys())
+                        if dias_treinados_ev:
+                            st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin:16px 0 8px;'>🔍 Detalhe do Dia</p>", unsafe_allow_html=True)
+                            dia_sel_ev = st.select_slider("Selecione um dia treinado:", options=dias_treinados_ev, key="coach_ev_dia_sel", label_visibility="collapsed")
+                            data_sel_ev = datetime(ano_ev, mes_ev, dia_sel_ev).date()
+                            df_dia_ev = df_aluno_ev[df_aluno_ev["data_date"] == data_sel_ev].copy()
+                            if not df_dia_ev.empty:
+                                treino_do_dia_ev = str(df_dia_ev.iloc[0].get("treino","")) if "treino" in df_dia_ev.columns else ""
+                                det_html = (
+                                    f"<div style='background:rgba(18,17,17,0.95);border-radius:16px;overflow:hidden;"
+                                    f"margin-bottom:16px;border:1px solid rgba(255,255,255,0.05);'>"
+                                    f"<div style='padding:12px 18px 8px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
+                                    f"<span style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;'>"
+                                    f"📅 {data_sel_ev.strftime('%d/%m/%Y')}"
+                                    f"{'  •  ' + treino_do_dia_ev if treino_do_dia_ev and treino_do_dia_ev != 'nan' else ''}"
+                                    f"</span></div>"
+                                )
+                                for _, row_d in df_dia_ev.sort_values("exercicio").iterrows():
+                                    carga_d = float(row_d.get("carga", 0))
+                                    ex_d = str(row_d.get("exercicio",""))
+                                    det_html += (
+                                        f"<div style='display:flex;justify-content:space-between;align-items:center;"
+                                        f"padding:11px 18px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
+                                        f"<div style='color:#ccc;font-family:Inter;font-size:13px;font-weight:500;'>{ex_d}</div>"
+                                        f"<div style='color:#F9C03D;font-family:Space Grotesk;font-weight:700;font-size:1rem;'>{carga_d:.1f} kg</div></div>"
+                                    )
+                                det_html += "</div>"
+                                st.markdown(det_html, unsafe_allow_html=True)
+
+                        # PROGRESSÃO DE CARGA
+                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📊 Progressão de Carga</p>", unsafe_allow_html=True)
+                        col_per_ev, col_tr_ev = st.columns(2)
+                        with col_per_ev:
+                            periodo_ev = st.selectbox("Período:", ["Ultimas 4 semanas","Ultimo mes","Ultimos 3 meses","Tudo"], key="coach_ev_periodo")
+                        hoje_dt_ev = pd.Timestamp(hoje_ref)
+                        if periodo_ev == "Ultimas 4 semanas":  corte_ev = hoje_dt_ev - pd.Timedelta(weeks=4)
+                        elif periodo_ev == "Ultimo mes":        corte_ev = hoje_dt_ev - pd.Timedelta(days=30)
+                        elif periodo_ev == "Ultimos 3 meses":   corte_ev = hoje_dt_ev - pd.Timedelta(days=90)
+                        else:                                   corte_ev = pd.Timestamp("2000-01-01")
+                        df_p_ev = df_aluno_ev[df_aluno_ev["data"] >= corte_ev]
+                        if "treino" in df_p_ev.columns:
+                            treinos_disp_ev = df_p_ev["treino"].dropna().unique().tolist()
+                            with col_tr_ev:
+                                treino_sel_ev = st.selectbox("Treino:", ["Todos"] + treinos_disp_ev, key="coach_ev_treino_sel")
+                            if treino_sel_ev != "Todos":
+                                df_p_ev = df_p_ev[df_p_ev["treino"] == treino_sel_ev]
+                        exercicios_disp_ev = df_p_ev["exercicio"].dropna().unique().tolist()
+                        if not exercicios_disp_ev:
+                            st.info("Nenhum exercício encontrado para os filtros selecionados.")
                         else:
-                            exercicio_sel = st.selectbox("Exercicio:", exercicios_disp, key="coach_ex_sel")
-                            df_prog = df_p[df_p["exercicio"] == exercicio_sel].sort_values("data")
-                            df_prog["data_display"] = df_prog["data"].dt.strftime("%d/%m/%Y")
-                            fig = px.line(df_prog, x="data_display", y="carga", markers=True)
-                            fig.update_traces(line_color="#F9C03D", marker=dict(color="#F9C03D", size=8))
-                            fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                                              font_color="white", margin=dict(l=0,r=0,t=10,b=0),
-                                              xaxis_title="", yaxis_title="kg")
-                            fig.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.05)")
-                            fig.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
-                            st.plotly_chart(fig, use_container_width=True)
+                            exercicio_sel_ev = st.selectbox("Exercício:", exercicios_disp_ev, key="coach_ev_ex_sel")
+                            df_prog_ev = df_p_ev[df_p_ev["exercicio"] == exercicio_sel_ev].sort_values("data")
+                            df_prog_ev["data_display"] = df_prog_ev["data"].dt.strftime("%d/%m/%Y")
+                            fig_ev = px.line(df_prog_ev, x="data_display", y="carga", markers=True)
+                            fig_ev.update_traces(line_color="#F9C03D", marker=dict(color="#F9C03D", size=8))
+                            fig_ev.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                                 font_color="white", margin=dict(l=0,r=0,t=10,b=0),
+                                                 xaxis_title="", yaxis_title="kg")
+                            fig_ev.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.05)")
+                            fig_ev.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
+                            st.plotly_chart(fig_ev, use_container_width=True)
 
             # ABA CHECKINS
             elif st.session_state.coach_aba == "checkins":
@@ -907,36 +1021,6 @@ else:
                                     "Relato": "Relato do Aluno"
                                 }, hide_index=True, use_container_width=True
                             )
-
-                            # DETALHE DO DIA
-                            st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin:16px 0 8px;'>🔍 Detalhe do Dia</p>", unsafe_allow_html=True)
-                            datas_ci = df_f["data"].dropna().dt.strftime("%d/%m/%Y").tolist()
-                            if datas_ci:
-                                data_sel_ci = st.selectbox("Selecione a data:", datas_ci, key="coach_ci_data_sel")
-                                linha_sel = df_f[df_f["data"].dt.strftime("%d/%m/%Y") == data_sel_ci]
-                                if not linha_sel.empty:
-                                    row_ci = linha_sel.iloc[0]
-                                    peso_ci  = row_ci.get("peso", "—")
-                                    feed_ci  = str(row_ci.get("feedback", "")).strip()
-                                    if not feed_ci or feed_ci.lower() == "nan":
-                                        feed_ci = "Sem relato registrado."
-                                    st.markdown(
-                                        f"<div style='background:rgba(22,21,21,0.95);border:1px solid rgba(255,255,255,0.06);"
-                                        f"border-radius:16px;padding:18px 20px;margin-top:8px;'>"
-                                        f"<div style='display:flex;gap:24px;margin-bottom:12px;'>"
-                                        f"<div><p style='color:#555;font-family:Inter;font-size:9px;letter-spacing:2px;"
-                                        f"text-transform:uppercase;margin:0 0 4px;'>Data</p>"
-                                        f"<p style='color:#fff;font-family:Space Grotesk;font-weight:700;font-size:1rem;margin:0;'>{data_sel_ci}</p></div>"
-                                        f"<div><p style='color:#555;font-family:Inter;font-size:9px;letter-spacing:2px;"
-                                        f"text-transform:uppercase;margin:0 0 4px;'>Peso</p>"
-                                        f"<p style='color:#F9C03D;font-family:Space Grotesk;font-weight:700;font-size:1rem;margin:0;'>{peso_ci} kg</p></div>"
-                                        f"</div>"
-                                        f"<p style='color:#555;font-family:Inter;font-size:9px;letter-spacing:2px;"
-                                        f"text-transform:uppercase;margin:0 0 6px;'>Relato do Aluno</p>"
-                                        f"<p style='color:#bbb;font-family:Inter;font-size:13px;line-height:1.6;margin:0;"
-                                        f"white-space:pre-line;'>{feed_ci}</p></div>",
-                                        unsafe_allow_html=True
-                                    )
 
                             df_f2 = df_f.sort_values("data")
                             df_f2["data_display"] = df_f2["data"].dt.strftime("%d/%m/%Y")
@@ -1916,8 +2000,8 @@ else:
         except:
             pass
 
-        # ---- ABAS: TREINO | CHECK-IN | EVOLUÇÃO | DIETA ----
-        col_t, col_c, col_e, col_d = st.columns(4)
+        # ---- ABAS: TREINO | CHECK-IN | DIETA ----
+        col_t, col_c, col_d = st.columns(3)
         with col_t:
             is_treino = st.session_state.aba_ativa == 'treino'
             st.markdown(f'<div class="{"btn-primary" if is_treino else ""}">', unsafe_allow_html=True)
@@ -1930,13 +2014,6 @@ else:
             st.markdown(f'<div class="{"btn-primary" if is_checkin else ""}">', unsafe_allow_html=True)
             if st.button("📋 Check-in", key="tab_checkin", use_container_width=True):
                 st.session_state.aba_ativa = 'checkin'
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-        with col_e:
-            is_evolucao = st.session_state.aba_ativa == 'evolucao'
-            st.markdown(f'<div class="{"btn-primary" if is_evolucao else ""}">', unsafe_allow_html=True)
-            if st.button("📈 Evolução", key="tab_evolucao", use_container_width=True):
-                st.session_state.aba_ativa = 'evolucao'
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
         with col_d:
@@ -2079,199 +2156,6 @@ else:
 
         # ABA: MINHA EVOLUÇÃO
         # ==========================================================
-        elif st.session_state.aba_ativa == 'evolucao':
-            st.markdown(
-                "<h2 style='font-family:Space Grotesk;font-size:1.8rem;font-weight:900;line-height:1;margin-bottom:16px;'>"
-                "MINHA <span style='color:#F9C03D;'>EVOLUÇÃO</span></h2>",
-                unsafe_allow_html=True
-            )
-
-            meu_hist = historico_geral[historico_geral['email_aluno'] == st.session_state.email].copy() \
-                if not historico_geral.empty else pd.DataFrame()
-
-            if meu_hist.empty:
-                st.info("Nenhum treino registrado ainda. Complete seu primeiro treino para ver sua evolução aqui.")
-            else:
-                meu_hist['data'] = parsear_data(meu_hist['data'])
-
-                # Recordes Pessoais
-                st.markdown(
-                    "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>🏆 Recordes Pessoais</p>",
-                    unsafe_allow_html=True
-                )
-                prs = meu_hist.groupby('exercicio').agg(
-                    carga_max=('carga', 'max'),
-                    ultima_data=('data', 'max')
-                ).reset_index().sort_values('carga_max', ascending=False)
-
-                pr_html = "<div style='background:rgba(28,27,27,0.9);border-radius:14px;overflow:hidden;margin-bottom:20px;'>"
-                for _, r in prs.iterrows():
-                    pr_html += f"""
-                        <div class='pr-row'>
-                            <div>
-                                <div class='pr-nome'>{r['exercicio']}</div>
-                                <div class='pr-data'>{r['ultima_data'].strftime('%d/%m/%Y')}</div>
-                            </div>
-                            <div class='pr-carga'>{r['carga_max']:.1f} kg</div>
-                        </div>"""
-                pr_html += "</div>"
-                st.markdown(pr_html, unsafe_allow_html=True)
-
-                # Calendário de treinos
-                st.markdown(
-                    "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📅 Calendário de Treinos</p>",
-                    unsafe_allow_html=True
-                )
-
-                # Navegação de mês
-                if 'cal_mes' not in st.session_state:
-                    st.session_state.cal_mes = agora_brasilia_naive().replace(day=1)
-
-                col_prev, col_mes_label, col_next = st.columns([1, 3, 1])
-                with col_prev:
-                    if st.button("←", key="cal_prev", use_container_width=True):
-                        primeiro = st.session_state.cal_mes
-                        st.session_state.cal_mes = (primeiro - timedelta(days=1)).replace(day=1)
-                        st.rerun()
-                with col_mes_label:
-                    st.markdown(
-                        f"<p style='text-align:center;color:#ccc;font-family:Inter;font-size:13px;font-weight:600;letter-spacing:1px;margin:10px 0;'>"
-                        f"{st.session_state.cal_mes.strftime('%B %Y').upper()}</p>",
-                        unsafe_allow_html=True
-                    )
-                with col_next:
-                    hoje_dt = agora_brasilia_naive().replace(day=1)
-                    if st.session_state.cal_mes < hoje_dt:
-                        if st.button("→", key="cal_next", use_container_width=True):
-                            ultimo_dia = (st.session_state.cal_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
-                            st.session_state.cal_mes = ultimo_dia
-                            st.rerun()
-
-                # Monta dados do mês
-                mes_ref = st.session_state.cal_mes
-                ano, mes = mes_ref.year, mes_ref.month
-                primeiro_dia_semana = mes_ref.weekday()  # 0=segunda
-                import calendar as cal_lib
-                total_dias = cal_lib.monthrange(ano, mes)[1]
-
-                # Volume por dia no mês
-                meu_hist['data_date'] = meu_hist['data'].dt.date
-                vol_por_dia = {}
-                for _, row_h in meu_hist.iterrows():
-                    d = row_h['data_date']
-                    if d.year == ano and d.month == mes:
-                        vol = float(row_h.get('carga', 0))
-                        vol_por_dia[d.day] = vol_por_dia.get(d.day, 0) + vol
-
-                max_vol = max(vol_por_dia.values()) if vol_por_dia else 1
-
-                # HTML do calendário
-                dias_semana = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM']
-                cal_html = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;padding:16px;margin-bottom:20px;border:1px solid rgba(255,255,255,0.05);'>"
-                # Header dias da semana
-                cal_html += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:8px;'>"
-                for d in dias_semana:
-                    cal_html += f"<div style='text-align:center;color:#333;font-family:Inter;font-size:9px;letter-spacing:1px;font-weight:600;'>{d}</div>"
-                cal_html += "</div>"
-                # Grid de dias
-                cal_html += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;'>"
-                # Células vazias antes do dia 1
-                for _ in range(primeiro_dia_semana):
-                    cal_html += "<div></div>"
-                hoje_date = agora_brasilia_naive().date()
-                for dia in range(1, total_dias + 1):
-                    data_dia = datetime(ano, mes, dia).date()
-                    vol = vol_por_dia.get(dia, 0)
-                    is_hoje = data_dia == hoje_date
-                    if vol > 0:
-                        intensidade = vol / max_vol
-                        opacity = 0.3 + 0.7 * intensidade
-                        bg = f"rgba(249,192,61,{opacity:.2f})"
-                        cor_txt = "#0A0A0A" if intensidade > 0.5 else "#F9C03D"
-                        borda = "1px solid rgba(249,192,61,0.5)"
-                    else:
-                        bg = "rgba(255,255,255,0.03)"
-                        cor_txt = "#333"
-                        borda = "1px solid rgba(255,255,255,0.04)"
-                    anel = "box-shadow:0 0 0 2px #F9C03D;" if is_hoje else ""
-                    cal_html += (
-                        f"<div style='aspect-ratio:1;display:flex;align-items:center;justify-content:center;"
-                        f"border-radius:8px;background:{bg};border:{borda};{anel}"
-                        f"font-family:Space Grotesk;font-size:11px;font-weight:700;color:{cor_txt};'>{dia}</div>"
-                    )
-                cal_html += "</div>"
-                # Legenda
-                cal_html += (
-                    "<div style='display:flex;align-items:center;gap:8px;margin-top:12px;"
-                    "padding-top:10px;border-top:1px solid rgba(255,255,255,0.04);'>"
-                    "<div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,0.3);'></div>"
-                    "<span style='color:#444;font-family:Inter;font-size:9px;letter-spacing:1px;'>Volume baixo</span>"
-                    "<div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,1);margin-left:8px;'></div>"
-                    "<span style='color:#444;font-family:Inter;font-size:9px;letter-spacing:1px;'>Volume alto</span></div>"
-                )
-                cal_html += "</div>"
-                st.markdown(cal_html, unsafe_allow_html=True)
-
-                # Histórico detalhado do dia selecionado
-                dias_treinados = sorted(vol_por_dia.keys())
-                if dias_treinados:
-                    st.markdown(
-                        "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;"
-                        "text-transform:uppercase;margin:16px 0 8px;'>🔍 Detalhe do Dia</p>",
-                        unsafe_allow_html=True
-                    )
-                    dia_sel = st.select_slider(
-                        "Selecione um dia treinado:",
-                        options=dias_treinados,
-                        key="cal_dia_sel",
-                        label_visibility="collapsed"
-                    )
-                    data_sel = datetime(ano, mes, dia_sel).date()
-                    df_dia = meu_hist[meu_hist['data_date'] == data_sel].copy()
-                    if not df_dia.empty:
-                        treino_do_dia = str(df_dia.iloc[0].get('treino', '')) if 'treino' in df_dia.columns else ''
-                        detalhe_html = (
-                            f"<div style='background:rgba(18,17,17,0.95);border-radius:16px;"
-                            f"overflow:hidden;margin-bottom:16px;border:1px solid rgba(255,255,255,0.05);'>"
-                            f"<div style='padding:12px 18px 8px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
-                            f"<span style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;"
-                            f"letter-spacing:2px;text-transform:uppercase;'>"
-                            f"📅 {data_sel.strftime('%d/%m/%Y')}"
-                            f"{'  •  ' + treino_do_dia if treino_do_dia and treino_do_dia != 'nan' else ''}"
-                            f"</span></div>"
-                        )
-                        for _, row_d in df_dia.sort_values('exercicio').iterrows():
-                            carga_d = float(row_d.get('carga', 0))
-                            ex_d = str(row_d.get('exercicio', ''))
-                            detalhe_html += (
-                                f"<div style='display:flex;justify-content:space-between;align-items:center;"
-                                f"padding:11px 18px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
-                                f"<div style='color:#ccc;font-family:Inter;font-size:13px;font-weight:500;'>{ex_d}</div>"
-                                f"<div style='color:#F9C03D;font-family:Space Grotesk;font-weight:700;"
-                                f"font-size:1rem;'>{carga_d:.1f} kg</div></div>"
-                            )
-                        detalhe_html += "</div>"
-                        st.markdown(detalhe_html, unsafe_allow_html=True)
-
-                # Gráfico de progressão
-                st.markdown(
-                    "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📊 Progressão de Carga</p>",
-                    unsafe_allow_html=True
-                )
-                ex_sel = st.selectbox("Selecione o exercício:", meu_hist['exercicio'].unique().tolist(), key="ev_ex")
-                df_prog = meu_hist[meu_hist['exercicio'] == ex_sel].sort_values('data')
-                df_prog['data_display'] = df_prog['data'].dt.strftime('%d/%m/%Y')
-                fig = px.line(df_prog, x='data_display', y='carga', markers=True)
-                fig.update_traces(line_color='#F9C03D', marker=dict(color='#F9C03D', size=8))
-                fig.update_layout(
-                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    font_color="white", margin=dict(l=0, r=0, t=10, b=0),
-                    xaxis_title="", yaxis_title="kg"
-                )
-                fig.update_xaxes(type='category', gridcolor='rgba(255,255,255,0.05)')
-                fig.update_yaxes(gridcolor='rgba(255,255,255,0.05)')
-                st.plotly_chart(fig, use_container_width=True)
-
         # ==========================================================
         # ABA: TREINO
         # ==========================================================
