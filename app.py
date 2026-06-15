@@ -615,46 +615,7 @@ else:
             else:
                 st.sidebar.error("As senhas não coincidem.")
 
-    with st.sidebar.expander("📝 Check-in Semanal"):
-        if st.session_state.get("checkin_enviado"):
-            ci_data = st.session_state.get("checkin_dados", {})
-            st.sidebar.markdown(
-                f"<div style='background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);"
-                f"border-radius:12px;padding:12px 14px;'>"
-                f"<p style='color:#4ade80;font-family:Inter;font-size:9px;letter-spacing:2px;"
-                f"text-transform:uppercase;font-weight:700;margin-bottom:6px;'>✅ Check-in Recebido</p>"
-                f"<p style='color:#aaa;font-family:Inter;font-size:12px;margin:2px 0;'>"
-                f"📅 {ci_data.get('data','')}</p>"
-                f"<p style='color:#aaa;font-family:Inter;font-size:12px;margin:2px 0;'>"
-                f"⚖️ {ci_data.get('peso','')} kg</p>"
-                f"<p style='color:#555;font-family:Inter;font-size:11px;margin-top:6px;'>"
-                f"Seu coach foi notificado!</p></div>",
-                unsafe_allow_html=True
-            )
-            if st.sidebar.button("Novo Check-in", key="novo_checkin"):
-                st.session_state.checkin_enviado = False
-                st.rerun()
-        else:
-            with st.form("form_checkin", clear_on_submit=True):
-                st.markdown("##### Relatório de Evolução")
-                peso_atual = st.number_input("Peso Atual (kg)", min_value=30.0, step=0.1)
-                feedback = st.text_area("Como se sentiu (Fome, Sono, Treino)?")
-                if st.form_submit_button("ENVIAR PARA O COACH"):
-                    try:
-                        try:
-                            df_ci = ler_sem_cache("checkins")
-                        except:
-                            df_ci = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
-                        data_envio = agora_brasilia_naive().strftime("%d/%m/%Y")
-                        novo = pd.DataFrame([{"data": data_envio,
-                                              "email": st.session_state.email,
-                                              "peso": peso_atual, "feedback": feedback}])
-                        conn.update(worksheet="checkins", data=pd.concat([df_ci, novo], ignore_index=True))
-                        st.session_state.checkin_enviado = True
-                        st.session_state.checkin_dados = {"data": data_envio, "peso": peso_atual}
-                        st.rerun()
-                    except Exception as e:
-                        st.sidebar.error(f"Erro: {e}")
+
 
     # ---- PAINEL DO COACH ----
     ativar_dashboard = False
@@ -946,6 +907,37 @@ else:
                                     "Relato": "Relato do Aluno"
                                 }, hide_index=True, use_container_width=True
                             )
+
+                            # DETALHE DO DIA
+                            st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin:16px 0 8px;'>🔍 Detalhe do Dia</p>", unsafe_allow_html=True)
+                            datas_ci = df_f["data"].dropna().dt.strftime("%d/%m/%Y").tolist()
+                            if datas_ci:
+                                data_sel_ci = st.selectbox("Selecione a data:", datas_ci, key="coach_ci_data_sel")
+                                linha_sel = df_f[df_f["data"].dt.strftime("%d/%m/%Y") == data_sel_ci]
+                                if not linha_sel.empty:
+                                    row_ci = linha_sel.iloc[0]
+                                    peso_ci  = row_ci.get("peso", "—")
+                                    feed_ci  = str(row_ci.get("feedback", "")).strip()
+                                    if not feed_ci or feed_ci.lower() == "nan":
+                                        feed_ci = "Sem relato registrado."
+                                    st.markdown(
+                                        f"<div style='background:rgba(22,21,21,0.95);border:1px solid rgba(255,255,255,0.06);"
+                                        f"border-radius:16px;padding:18px 20px;margin-top:8px;'>"
+                                        f"<div style='display:flex;gap:24px;margin-bottom:12px;'>"
+                                        f"<div><p style='color:#555;font-family:Inter;font-size:9px;letter-spacing:2px;"
+                                        f"text-transform:uppercase;margin:0 0 4px;'>Data</p>"
+                                        f"<p style='color:#fff;font-family:Space Grotesk;font-weight:700;font-size:1rem;margin:0;'>{data_sel_ci}</p></div>"
+                                        f"<div><p style='color:#555;font-family:Inter;font-size:9px;letter-spacing:2px;"
+                                        f"text-transform:uppercase;margin:0 0 4px;'>Peso</p>"
+                                        f"<p style='color:#F9C03D;font-family:Space Grotesk;font-weight:700;font-size:1rem;margin:0;'>{peso_ci} kg</p></div>"
+                                        f"</div>"
+                                        f"<p style='color:#555;font-family:Inter;font-size:9px;letter-spacing:2px;"
+                                        f"text-transform:uppercase;margin:0 0 6px;'>Relato do Aluno</p>"
+                                        f"<p style='color:#bbb;font-family:Inter;font-size:13px;line-height:1.6;margin:0;"
+                                        f"white-space:pre-line;'>{feed_ci}</p></div>",
+                                        unsafe_allow_html=True
+                                    )
+
                             df_f2 = df_f.sort_values("data")
                             df_f2["data_display"] = df_f2["data"].dt.strftime("%d/%m/%Y")
                             fig_p = px.line(df_f2, x="data_display", y="peso", markers=True)
@@ -1723,7 +1715,7 @@ else:
                             <p style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;
                             letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Check-in Semanal</p>
                             <p style='color:#888;font-family:Inter;font-size:12px;margin:0;'>
-                            Seu coach precisa do seu feedback semanal. Abra o menu lateral e envie!</p>
+                            Seu coach precisa do seu feedback semanal. Acesse a aba <b style='color:#F9C03D;'>Check-in</b> e envie!</p>
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
@@ -1924,13 +1916,20 @@ else:
         except:
             pass
 
-        # ---- ABAS: TREINO | MINHA EVOLUÇÃO | DIETA ----
-        col_t, col_e, col_d = st.columns(3)
+        # ---- ABAS: TREINO | CHECK-IN | EVOLUÇÃO | DIETA ----
+        col_t, col_c, col_e, col_d = st.columns(4)
         with col_t:
             is_treino = st.session_state.aba_ativa == 'treino'
             st.markdown(f'<div class="{"btn-primary" if is_treino else ""}">', unsafe_allow_html=True)
             if st.button("🏋️ Treino", key="tab_treino", use_container_width=True):
                 st.session_state.aba_ativa = 'treino'
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+        with col_c:
+            is_checkin = st.session_state.aba_ativa == 'checkin'
+            st.markdown(f'<div class="{"btn-primary" if is_checkin else ""}">', unsafe_allow_html=True)
+            if st.button("📋 Check-in", key="tab_checkin", use_container_width=True):
+                st.session_state.aba_ativa = 'checkin'
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
         with col_e:
@@ -1951,9 +1950,60 @@ else:
         st.markdown("---")
 
         # ==========================================================
+        # ABA: CHECK-IN
+        # ==========================================================
+        if st.session_state.aba_ativa == 'checkin':
+            st.markdown(
+                "<h2 style='font-family:Space Grotesk;font-size:1.8rem;font-weight:900;line-height:1;margin-bottom:16px;'>"
+                "CHECK-IN <span style='color:#F9C03D;'>SEMANAL</span></h2>",
+                unsafe_allow_html=True
+            )
+            if st.session_state.get("checkin_enviado"):
+                ci_data = st.session_state.get("checkin_dados", {})
+                st.markdown(
+                    f"<div style='background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);"
+                    f"border-radius:14px;padding:18px 20px;'>"
+                    f"<p style='color:#4ade80;font-family:Inter;font-size:9px;letter-spacing:2px;"
+                    f"text-transform:uppercase;font-weight:700;margin-bottom:8px;'>✅ Check-in Recebido</p>"
+                    f"<p style='color:#aaa;font-family:Inter;font-size:13px;margin:4px 0;'>"
+                    f"📅 {ci_data.get('data','')}</p>"
+                    f"<p style='color:#aaa;font-family:Inter;font-size:13px;margin:4px 0;'>"
+                    f"⚖️ {ci_data.get('peso','')} kg</p>"
+                    f"<p style='color:#555;font-family:Inter;font-size:12px;margin-top:8px;'>"
+                    f"Seu coach foi notificado!</p></div>",
+                    unsafe_allow_html=True
+                )
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("Novo Check-in", key="novo_checkin_aba", use_container_width=True):
+                    st.session_state.checkin_enviado = False
+                    st.rerun()
+            else:
+                with st.form("form_checkin_aba", clear_on_submit=True):
+                    st.markdown("##### Relatório de Evolução")
+                    peso_atual_aba = st.number_input("Peso Atual (kg)", min_value=30.0, step=0.1, key="peso_checkin_aba")
+                    feedback_aba = st.text_area("Como se sentiu (Fome, Sono, Treino)?", key="feedback_checkin_aba")
+                    if st.form_submit_button("ENVIAR PARA O COACH", use_container_width=True):
+                        try:
+                            try:
+                                df_ci_aba = ler_sem_cache("checkins")
+                            except:
+                                df_ci_aba = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
+                            data_envio_aba = agora_brasilia_naive().strftime("%d/%m/%Y")
+                            novo_aba = pd.DataFrame([{"data": data_envio_aba,
+                                                      "email": st.session_state.email,
+                                                      "peso": peso_atual_aba,
+                                                      "feedback": feedback_aba}])
+                            conn.update(worksheet="checkins", data=pd.concat([df_ci_aba, novo_aba], ignore_index=True))
+                            st.session_state.checkin_enviado = True
+                            st.session_state.checkin_dados = {"data": data_envio_aba, "peso": peso_atual_aba}
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erro: {e}")
+
+        # ==========================================================
         # ABA: DIETA
         # ==========================================================
-        if st.session_state.aba_ativa == 'dieta':
+        elif st.session_state.aba_ativa == 'dieta':
             st.markdown(
                 "<h2 style='font-family:Space Grotesk;font-size:1.8rem;font-weight:900;line-height:1;margin-bottom:16px;'>"
                 "MINHA <span style='color:#F9C03D;'>DIETA</span></h2>",
