@@ -829,12 +829,25 @@ else:
         if st.session_state.aba_ativa == 'checkin':
             st.markdown(
                 "<h2 style='font-family:Space Grotesk;font-size:1.8rem;font-weight:900;line-height:1;margin-bottom:16px;'>"
-                "CHECK-<span style='color:#F9C03D;'>IN</span></h2>",
+                "<span style='color:#F9C03D;'>CHECK-IN</span></h2>",
                 unsafe_allow_html=True
             )
             with st.form("form_checkin_main", clear_on_submit=True):
                 st.markdown("##### Relatório de Evolução")
-                peso_atual = st.number_input("Peso Atual (kg)", min_value=30.0, step=0.1, key="peso_checkin_main")
+                ultimo_peso = 0.0
+                try:
+                    df_ci_peso = ler_sem_cache("checkins")
+                    if not df_ci_peso.empty:
+                        df_ci_peso['email'] = df_ci_peso['email'].astype(str).str.strip().str.lower()
+                        meus_checkins = df_ci_peso[df_ci_peso['email'] == st.session_state.email.lower()].copy()
+                        if not meus_checkins.empty:
+                            meus_checkins['data_dt'] = pd.to_datetime(meus_checkins['data'], dayfirst=True, errors='coerce')
+                            meus_checkins = meus_checkins.sort_values('data_dt')
+                            ultimo_peso = float(meus_checkins.iloc[-1].get('peso', 0) or 0)
+                except:
+                    ultimo_peso = 0.0
+                peso_checkin_key = f"peso_checkin_main_{st.session_state.email}"
+                peso_atual = st.number_input("Peso Atual (kg)", min_value=0.0, value=float(ultimo_peso), step=0.1, key=peso_checkin_key)
                 feedback = st.text_area("Como se sentiu (Fome, Sono, Treino)?", key="feedback_checkin_main")
                 if st.form_submit_button("ENVIAR PARA O COACH", use_container_width=True):
                     try:
@@ -1008,12 +1021,6 @@ else:
                             with st.expander("🎬 Ver Execução"):
                                 st.components.v1.html(f'<div style="position:relative;width:100%;padding-top:56.25%;overflow:hidden;border-radius:12px;background:#111;"><iframe src="{embed}" style="position:absolute;inset:0;width:100%;height:100%;border:0;" allowfullscreen></iframe></div>', height=260)
 
-                        st.markdown(f"""
-                            <div class='carga-display'>
-                                <p class='carga-valor'>{carga_atual:.1f}</p>
-                                <p class='carga-unit'>KG</p>
-                            </div>
-                        """, unsafe_allow_html=True)
 
                         carga_manual_key = f"carga_manual_{idx_atual}_{carga_atual:.1f}"
                         carga_manual = st.number_input(
