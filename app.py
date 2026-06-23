@@ -1,18 +1,20 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import plotly.express as px
 import time
 import base64
-import json
+import extra_streamlit_components as stx
+import html
 
-# --- 1. CONFIGURAÇÃO ---
-st.set_page_config(page_title="JV PERFORMANCE", page_icon="💪", layout="centered")
+# --- 1. CONFIGURAÃ‡ÃƒO ---
+st.set_page_config(page_title="JV PERFORMANCE", page_icon="ðŸ’ª", layout="centered")
 
 # --- 2. COOKIE MANAGER ---
+cookie_manager = stx.CookieManager()
 
-# --- 3. INICIALIZAÇÃO DE ESTADO ---
+# --- 3. INICIALIZAÃ‡ÃƒO DE ESTADO ---
 defaults = {
     'logado': False, 'email': '', 'saindo': False,
     'ex_index': 0, 'cargas_sessao': {}, 'treino_finalizado': False,
@@ -22,51 +24,12 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# --- 4. PERSISTÊNCIA POR LOGIN via localStorage ---
-# Injeta script que lê localStorage e coloca na query string de forma síncrona
+# --- 4. PERSISTÃŠNCIA POR COOKIE ---
 if not st.session_state.logado and not st.session_state.saindo:
-    uid_param = st.query_params.get("uid", "")
-    if uid_param and "@" in uid_param:
+    token = cookie_manager.get(cookie="jv_ferreira_login")
+    if token:
         st.session_state.logado = True
-        st.session_state.email = uid_param.strip().lower()
-    else:
-        # Script que lê localStorage e redireciona com ?uid= se encontrar
-        st.components.v1.html("""
-            <script>
-            const uid = localStorage.getItem('jv_uid');
-            if (uid && uid.includes('@')) {
-                const url = new URL(window.parent.location.href);
-                if (!url.searchParams.get('uid')) {
-                    url.searchParams.set('uid', uid);
-                    window.parent.location.replace(url.toString());
-                }
-            }
-            </script>
-        """, height=0)
-
-# Restaura progresso via query_params (síncrono — não depende de cookie assíncrono)
-if st.session_state.logado and 'prog_restaurado' not in st.session_state:
-    st.session_state.prog_restaurado = True
-    try:
-        progresso_raw = st.query_params.get("prog")
-        if progresso_raw:
-            progresso = json.loads(progresso_raw)
-            st.session_state.ex_index       = int(progresso.get('ex_index', 0))
-            st.session_state.treino_ativo   = progresso.get('treino_ativo', '')
-            st.session_state.notas_sessao   = progresso.get('notas_sessao', '')
-            cargas_raw = progresso.get('cargas_sessao', {})
-            if cargas_raw:
-                st.session_state.cargas_sessao = {k: float(v) for k, v in cargas_raw.items()}
-                if 'cargas_anteriores' not in st.session_state:
-                    st.session_state.cargas_anteriores = {}
-                for k, v in cargas_raw.items():
-                    chave_ant = f"ant_{k.replace('carga_','')}"
-                    if chave_ant not in st.session_state.cargas_anteriores:
-                        st.session_state.cargas_anteriores[chave_ant] = float(v)
-                for k, v in st.session_state.cargas_sessao.items():
-                    st.session_state[f"input_carga_{k.replace('carga_','')}"] = float(v)
-    except:
-        pass
+        st.session_state.email = token
 
 # --- 5. LOGO ---
 def get_base64_image(image_path):
@@ -80,7 +43,7 @@ img_data = get_base64_image("JV Ferreira logo.jpeg")
 logo_url = f"data:image/jpeg;base64,{img_data}" if img_data else \
     "https://drive.google.com/uc?export=view&id=1oIpYQkIp4Y0M0vumaR5Tpa0yVDwSF7mc"
 
-# --- 6. CONFIGURAÇÃO ---
+# --- 6. CONFIGURAÃ‡ÃƒO ---
 EMAIL_COACH = "jaaovictor96@gmail.com"
 conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 
@@ -88,72 +51,10 @@ conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
 def ler_planilha(worksheet: str):
     return conn.read(worksheet=worksheet)
 
-def ler_sem_cache(worksheet: str, tentativas: int = 3):
-    for i in range(tentativas):
-        try:
-            return conn.read(worksheet=worksheet, ttl=0)
-        except Exception:
-            if i < tentativas - 1:
-                time.sleep(1.5)
-    return pd.DataFrame()
+def ler_sem_cache(worksheet: str):
+    return conn.read(worksheet=worksheet, ttl=0)
 
-# --- 7. FUNÇÕES DE ENGAJAMENTO ---
-
-
-def agora_brasilia() -> datetime:
-    """Retorna datetime atual no fuso de Brasilia (UTC-3)."""
-    return datetime.now(timezone.utc) - timedelta(hours=3)
-
-def agora_brasilia_naive() -> datetime:
-    """Retorna datetime atual no fuso de Brasilia sem tzinfo."""
-    return (datetime.now(timezone.utc) - timedelta(hours=3)).replace(tzinfo=None)
-
-def limpar_pix(valor: str) -> str:
-    """Remove .0 que o pandas adiciona ao ler números da planilha."""
-    v = str(valor).strip()
-    if v.lower() in ("nan", "none", ""):
-        return ""
-    # Remove sufixo .0 de valores numéricos (ex: "11999999999.0" -> "11999999999")
-    if v.endswith(".0") and v[:-2].lstrip("+-").isdigit():
-        return v[:-2]
-    return v
-
-def proximo_vencimento(dia_venc: int) -> 'datetime.date':
-    """Calcula a próxima data de vencimento com base no dia do mês.
-    Se o dia já passou este mês, retorna o mesmo dia do próximo mês."""
-    import calendar
-    hoje = agora_brasilia_naive().date()
-    ano, mes = hoje.year, hoje.month
-    ultimo_dia = calendar.monthrange(ano, mes)[1]
-    dia_ajustado = min(dia_venc, ultimo_dia)
-    venc_este_mes = hoje.replace(day=dia_ajustado)
-    if venc_este_mes >= hoje:
-        return venc_este_mes
-    if mes == 12:
-        ano, mes = ano + 1, 1
-    else:
-        mes += 1
-    ultimo_dia_prox = calendar.monthrange(ano, mes)[1]
-    return hoje.replace(year=ano, month=mes, day=min(dia_venc, ultimo_dia_prox))
-
-def proximo_vencimento_futuro(dia_venc: int) -> 'datetime.date':
-    """Sempre retorna o vencimento do PRÓXIMO mês — usado quando o mês atual já foi pago."""
-    import calendar
-    hoje = agora_brasilia_naive().date()
-    ano, mes = hoje.year, hoje.month
-    if mes == 12:
-        ano, mes = ano + 1, 1
-    else:
-        mes += 1
-    ultimo_dia = calendar.monthrange(ano, mes)[1]
-    return hoje.replace(year=ano, month=mes, day=min(dia_venc, ultimo_dia))
-
-def parsear_data(series: pd.Series) -> pd.Series:
-    """Parseia datas em formato misto (dd/mm/YYYY ou dd/mm/YYYY HH:MM) de forma robusta."""
-    try:
-        return pd.to_datetime(series, dayfirst=True, format='mixed', errors='coerce')
-    except Exception:
-        return pd.to_datetime(series, dayfirst=True, errors='coerce')
+# --- 7. FUNÃ‡Ã•ES DE ENGAJAMENTO ---
 
 def calcular_streak(historico: pd.DataFrame, email: str) -> int:
     if historico.empty:
@@ -162,23 +63,16 @@ def calcular_streak(historico: pd.DataFrame, email: str) -> int:
     if df.empty:
         return 0
     try:
-        df['data_dt'] = parsear_data(df['data']).dt.date
-        df = df.dropna(subset=['data_dt'])
+        df['data_dt'] = pd.to_datetime(df['data'], dayfirst=True).dt.date
         dias = sorted(df['data_dt'].unique(), reverse=True)
-        if not dias:
-            return 0
-        hoje = agora_brasilia_naive().date()
-        # Considera streak ativo se treinou hoje OU ontem (não penaliza quem
-        # treinou à noite e abre o app no dia seguinte antes de treinar)
-        if (hoje - dias[0]).days > 1:
+        hoje = datetime.now().date()
+        ontem = hoje - timedelta(days=1)
+        if dias[0] not in (hoje, ontem):
             return 0
         streak = 1
         for i in range(1, len(dias)):
-            diff = (dias[i - 1] - dias[i]).days
-            if diff == 1:
+            if (dias[i - 1] - dias[i]).days == 1:
                 streak += 1
-            elif diff == 0:
-                continue  # mesmo dia, ignora duplicata
             else:
                 break
         return streak
@@ -187,17 +81,17 @@ def calcular_streak(historico: pd.DataFrame, email: str) -> int:
 
 def frases_streak(streak: int) -> tuple:
     if streak == 0:
-        return "💤", "Hora de voltar à ação!"
+        return "ðŸ’¤", "Hora de voltar Ã  aÃ§Ã£o!"
     elif streak == 1:
-        return "🔥", "Primeiro passo dado. Não pare agora!"
+        return "ðŸ”¥", "Primeiro passo dado. NÃ£o pare agora!"
     elif streak <= 3:
-        return "⚡", f"{streak} dias seguidos. O hábito está se formando."
+        return "âš¡", f"{streak} dias seguidos. O hÃ¡bito estÃ¡ se formando."
     elif streak <= 7:
-        return "🚀", f"{streak} dias consecutivos. Você está em chamas!"
+        return "ðŸš€", f"{streak} dias consecutivos. VocÃª estÃ¡ em chamas!"
     elif streak <= 14:
-        return "💎", f"{streak} dias! Consistência de atleta de elite."
+        return "ðŸ’Ž", f"{streak} dias! ConsistÃªncia de atleta de elite."
     else:
-        return "🏆", f"{streak} dias seguidos. Você é imparável!"
+        return "ðŸ†", f"{streak} dias seguidos. VocÃª Ã© imparÃ¡vel!"
 
 def calcular_volume(exercicios_df: pd.DataFrame, cargas: dict) -> float:
     total = 0.0
@@ -217,7 +111,7 @@ def volume_anterior(historico: pd.DataFrame, email: str, treino: str,
     if df.empty:
         return 0.0
     try:
-        df['data_dt'] = parsear_data(df['data'])
+        df['data_dt'] = pd.to_datetime(df['data'], dayfirst=True)
         ultima_data = df['data_dt'].max()
         df_ult = df[df['data_dt'] == ultima_data]
         total = 0.0
@@ -503,6 +397,105 @@ st.markdown(f"""
     ::-webkit-scrollbar {{ width: 3px; }}
     ::-webkit-scrollbar-track {{ background: transparent; }}
     ::-webkit-scrollbar-thumb {{ background: rgba(249,192,61,0.2); border-radius: 99px; }}
+
+    @media (prefers-reduced-motion: reduce) {{
+        *, *::before, *::after {{
+            animation-duration: 0.001ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.001ms !important;
+            scroll-behavior: auto !important;
+        }}
+    }}
+
+    @media (max-width: 640px) {{
+        .stApp {{
+            background-attachment: scroll !important;
+            background-size: 78vw auto !important;
+        }}
+        .block-container {{
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+            padding-top: 1rem !important;
+            padding-bottom: 5rem !important;
+        }}
+        .main-title {{
+            letter-spacing: 0 !important;
+        }}
+        .sub-title,
+        .coach-alert-label,
+        .coach-msg-label,
+        .ex-label,
+        .stat-lbl {{
+            letter-spacing: 1.5px !important;
+        }}
+        .ex-card,
+        .conclusao-card,
+        .coach-alert,
+        .streak-card {{
+            border-radius: 14px !important;
+            padding-left: 16px !important;
+            padding-right: 16px !important;
+            box-shadow: 0 3px 18px rgba(0,0,0,0.35) !important;
+        }}
+        .ex-name,
+        .coach-alert-texto,
+        .coach-msg-texto,
+        .pr-nome,
+        .record-badge {{
+            overflow-wrap: anywhere;
+            word-break: normal;
+        }}
+        .stat-row {{
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 6px !important;
+        }}
+        .stat-box {{
+            padding: 12px 6px !important;
+        }}
+        .stat-val {{
+            font-size: 1rem !important;
+        }}
+        .carga-grid {{
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+            margin-top: 8px;
+        }}
+        .carga-grid [data-testid="column"] {{
+            width: 100% !important;
+            flex: 1 1 48% !important;
+        }}
+        .mobile-account-panel {{
+            display: block;
+            background: rgba(18,17,17,0.95);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 14px;
+            padding: 12px 14px;
+            margin-bottom: 14px;
+        }}
+        .mobile-account-label {{
+            color: #F9C03D;
+            font-family: Inter, sans-serif;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            margin-bottom: 3px;
+        }}
+        .mobile-account-email {{
+            color: #777;
+            font-family: Inter, sans-serif;
+            font-size: 12px;
+            overflow-wrap: anywhere;
+        }}
+    }}
+
+    @media (min-width: 641px) {{
+        .mobile-account-panel {{
+            display: none;
+        }}
+    }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -514,48 +507,44 @@ if not st.session_state.logado:
     st.markdown("<h1 class='main-title' style='color:#F9C03D;'>TEAM<br>JV FERREIRA</h1>", unsafe_allow_html=True)
     st.markdown("<p class='sub-title'>Aesthetic & Performance Lab<br>Consultoria Online</p>", unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns([1, 4, 1])
-    with col2:
+    with st.container():
         email_input = st.text_input("E-mail do Atleta", placeholder="atleta@exemplo.com").strip().lower()
-        senha_input = st.text_input("Senha", type="password", placeholder="••••••").strip()
+        senha_input = st.text_input("Senha", type="password", placeholder="â€¢â€¢â€¢â€¢â€¢â€¢").strip()
 
         st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
         if st.button("ACESSAR", use_container_width=True):
-            usuarios = pd.DataFrame()
-            for tentativa in range(4):
+            try:
                 try:
                     usuarios = conn.read(worksheet="usuarios")
-                    if not usuarios.empty:
-                        break
                 except:
-                    pass
-                time.sleep(1.5)
+                    time.sleep(1)
+                    usuarios = conn.read(worksheet="usuarios")
 
-            if usuarios.empty:
-                st.error("Não foi possível conectar. Verifique sua internet e tente novamente.")
-            else:
-                try:
-                    usuarios['email'] = usuarios['email'].astype(str).str.strip().str.lower()
-                    usuarios['senha'] = usuarios['senha'].astype(str).str.strip()
+                usuarios['email'] = usuarios['email'].astype(str).str.strip().str.lower()
+                usuarios['senha'] = usuarios['senha'].astype(str).str.strip()
 
-                    if ((usuarios['email'] == email_input) & (usuarios['senha'] == senha_input)).any():
-                        st.session_state.logado = True
-                        st.session_state.email = email_input
-                        st.session_state.saindo = False
-                        try:
-                            st.query_params["uid"] = email_input
-                        except:
-                            pass
-                        st.rerun()
-                    else:
-                        st.error("Credenciais inválidas.")
-                except Exception as e:
-                    st.error(f"Erro ao verificar credenciais: {e}")
+                if ((usuarios['email'] == email_input) & (usuarios['senha'] == senha_input)).any():
+                    st.session_state.logado = True
+                    st.session_state.email = email_input
+                    st.session_state.saindo = False
+                    try:
+                        cookie_manager.set(
+                            cookie="jv_ferreira_login",
+                            val=email_input,
+                            expires_at=datetime.now() + timedelta(days=30)
+                        )
+                    except:
+                        pass
+                    st.rerun()
+                else:
+                    st.error("Credenciais invÃ¡lidas.")
+            except:
+                st.error("Instabilidade na rede. Tente novamente em 1 segundo.")
         st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ==========================================================
-# ÁREA LOGADA
+# ÃREA LOGADA
 # ==========================================================
 else:
     # ---- SIDEBAR ----
@@ -569,17 +558,12 @@ else:
     )
     st.sidebar.divider()
 
-    if st.sidebar.button("↩ Sair", use_container_width=True):
+    if st.sidebar.button("â†© Sair", use_container_width=True):
         # 1. Deleta o cookie
         try:
-            st.components.v1.html("""
-                <script>
-                localStorage.removeItem('jv_uid');
-                const url = new URL(window.parent.location.href);
-                url.searchParams.delete('uid');
-                window.parent.location.replace(url.toString());
-                </script>
-            """, height=0)
+            todos_cookies = cookie_manager.get_all()
+            if "jv_ferreira_login" in todos_cookies:
+                cookie_manager.delete("jv_ferreira_login")
         except:
             pass
         # 2. Reseta estado para defaults
@@ -592,7 +576,7 @@ else:
 
     st.sidebar.divider()
 
-    with st.sidebar.expander("🔑 Alterar Minha Senha"):
+    with st.sidebar.expander("ðŸ”‘ Alterar Minha Senha"):
         nova_senha = st.text_input("Nova Senha", type="password", key="new_pass")
         confirma_senha = st.text_input("Confirme", type="password", key="conf_pass")
         if st.button("ATUALIZAR SENHA"):
@@ -607,1349 +591,180 @@ else:
                         time.sleep(1)
                         st.rerun()
                     else:
-                        st.sidebar.error("Usuário não encontrado.")
+                        st.sidebar.error("UsuÃ¡rio nÃ£o encontrado.")
                 except Exception as e:
                     st.sidebar.error(f"Erro: {e}")
             elif len(nova_senha) < 4:
-                st.sidebar.warning("Mínimo 4 caracteres.")
+                st.sidebar.warning("MÃ­nimo 4 caracteres.")
             else:
-                st.sidebar.error("As senhas não coincidem.")
+                st.sidebar.error("As senhas nÃ£o coincidem.")
 
-
+    with st.sidebar.expander("ðŸ“ Check-in Quinzenal"):
+        with st.form("form_checkin", clear_on_submit=True):
+            st.markdown("##### RelatÃ³rio de EvoluÃ§Ã£o")
+            peso_atual = st.number_input("Peso Atual (kg)", min_value=30.0, step=0.1)
+            feedback = st.text_area("Como se sentiu (Fome, Sono, Treino)?")
+            if st.form_submit_button("ENVIAR PARA O COACH"):
+                try:
+                    try:
+                        df_ci = ler_sem_cache("checkins")
+                    except:
+                        df_ci = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
+                    novo = pd.DataFrame([{"data": datetime.now().strftime("%d/%m/%Y"),
+                                          "email": st.session_state.email,
+                                          "peso": peso_atual, "feedback": feedback}])
+                    conn.update(worksheet="checkins", data=pd.concat([df_ci, novo], ignore_index=True))
+                    st.sidebar.success("Check-in enviado! ðŸš€")
+                except Exception as e:
+                    st.sidebar.error(f"Erro: {e}")
 
     # ---- PAINEL DO COACH ----
     ativar_dashboard = False
     if st.session_state.email == EMAIL_COACH:
         st.sidebar.divider()
-        st.sidebar.subheader("🛠 PAINEL DO COACH")
-        ativar_dashboard = st.sidebar.checkbox("Visualizar Métricas")
-
-        with st.sidebar.expander("➕ Cadastrar Novo Aluno"):
-            with st.form("form_novo_aluno", clear_on_submit=True):
-                novo_nome_aluno  = st.text_input("Nome Completo", placeholder="Ex: João Silva")
-                novo_email_aluno = st.text_input("E-mail", placeholder="joao@email.com")
-                nova_senha_aluno = st.text_input("Senha inicial", type="password", placeholder="Min. 4 caracteres")
-                nova_msg_aluno   = st.text_input("Mensagem de boas-vindas (opcional)")
-                if st.form_submit_button("CADASTRAR"):
-                    if novo_nome_aluno and novo_email_aluno and len(nova_senha_aluno) >= 4:
-                        try:
-                            df_u_cad = ler_sem_cache("usuarios")
-                            df_u_cad["email"] = df_u_cad["email"].astype(str).str.strip().str.lower()
-                            if novo_email_aluno.strip().lower() in df_u_cad["email"].values:
-                                st.sidebar.warning("E-mail já cadastrado.")
-                            else:
-                                novo_aluno = pd.DataFrame([{
-                                    "nome": novo_nome_aluno.strip(),
-                                    "email": novo_email_aluno.strip().lower(),
-                                    "senha": nova_senha_aluno.strip(),
-                                    "mensagem_coach": nova_msg_aluno.strip()
-                                }])
-                                conn.update(worksheet="usuarios", data=pd.concat([df_u_cad, novo_aluno], ignore_index=True))
-                                st.cache_data.clear()
-                                st.sidebar.success(f"{novo_nome_aluno} cadastrado!")
-                                st.rerun()
-                        except Exception as e:
-                            st.sidebar.error(f"Erro: {e}")
-                    else:
-                        st.sidebar.warning("Preencha nome, e-mail e senha (min. 4 caracteres).")
+        st.sidebar.subheader("ðŸ›  PAINEL DO COACH")
+        ativar_dashboard = st.sidebar.checkbox("Visualizar MÃ©tricas")
 
     # ==========================================================
     # DASHBOARD DO COACH
     # ==========================================================
     if ativar_dashboard:
-        st.markdown("<h2 style='font-family:Space Grotesk;color:#F9C03D;margin-bottom:16px;'>PAINEL DO COACH</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='font-family:Space Grotesk;color:#F9C03D;'>ANÃLISE DE PERFORMANCE</h2>", unsafe_allow_html=True)
 
         df_usuarios = ler_sem_cache("usuarios")
-        df_coach    = ler_sem_cache("registros")
+        df_coach = ler_sem_cache("registros")
 
-        if df_usuarios.empty:
-            st.info("Nenhum aluno cadastrado.")
-        else:
-            df_usuarios["email"] = df_usuarios["email"].astype(str).str.strip().str.lower()
-            hoje_ref = agora_brasilia_naive().date()
+        if not df_usuarios.empty:
+            df_usuarios['email'] = df_usuarios['email'].astype(str).str.strip().str.lower()
+            nome_sel = st.selectbox("Selecione o Aluno:", df_usuarios['nome'].dropna().unique().tolist())
+            email_vinculado = df_usuarios[df_usuarios['nome'] == nome_sel]['email'].iloc[0]
 
-            # STATUS GERAL
             if not df_coach.empty:
-                df_coach_tmp = df_coach.copy()
-                df_coach_tmp["email_aluno"] = df_coach_tmp["email_aluno"].astype(str).str.strip().str.lower()
-                df_coach_tmp["data_dt"] = parsear_data(df_coach_tmp["data"]).dt.date
-                df_coach_tmp = df_coach_tmp.dropna(subset=["data_dt"])
-                ultimo_treino = df_coach_tmp.groupby("email_aluno")["data_dt"].max().to_dict()
-            else:
-                ultimo_treino = {}
+                df_coach['email_aluno'] = df_coach['email_aluno'].astype(str).str.strip().str.lower()
+                df_aluno = df_coach[df_coach['email_aluno'] == email_vinculado].copy()
 
-            st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>ALUNOS</p>", unsafe_allow_html=True)
-            sh = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;overflow:hidden;margin-bottom:20px;border:1px solid rgba(255,255,255,0.05);'>"
-            for _, row_u in df_usuarios.dropna(subset=["nome"]).iterrows():
-                em  = str(row_u["email"]).strip().lower()
-                nm  = str(row_u.get("nome", em))
-                ult = ultimo_treino.get(em)
-                if ult and not pd.isnull(ult):
-                    dias_off = (hoje_ref - ult).days
-                    if dias_off == 0:
-                        cor, icone, label = "#4ade80", "🟢", "Treinou hoje"
-                    elif dias_off <= 2:
-                        cor, icone, label = "#F9C03D", "🟡", f"Ha {dias_off} dia{'s' if dias_off>1 else ''}"
-                    else:
-                        cor, icone, label = "#f87171", "🔴", f"Ha {dias_off} dias - ATENCAO"
+                with st.expander("ðŸ” Debug (remova apÃ³s confirmar)"):
+                    st.write(f"Email buscado: `{email_vinculado}`")
+                    st.write(f"Emails em registros: {df_coach['email_aluno'].unique().tolist()}")
+                    st.write(f"Linhas encontradas: {len(df_aluno)}")
+
+                if not df_aluno.empty:
+                    df_aluno['data'] = pd.to_datetime(df_aluno['data'], dayfirst=True)
+                    exercicio_sel = st.selectbox("ExercÃ­cio:", df_aluno['exercicio'].unique())
+                    df_prog = df_aluno[df_aluno['exercicio'] == exercicio_sel].sort_values('data')
+                    df_prog['data_display'] = df_prog['data'].dt.strftime('%d/%m/%Y')
+                    fig = px.line(df_prog, x='data_display', y='carga', title=f'ProgressÃ£o: {exercicio_sel}', markers=True)
+                    fig.update_traces(line_color='#F9C03D')
+                    fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
+                    fig.update_xaxes(type='category', title="Data do Treino")
+                    st.plotly_chart(fig, use_container_width=True)
                 else:
-                    cor, icone, label = "#555", "⚫", "Nunca treinou"
-                sh += (
-                    f"<div style='display:flex;justify-content:space-between;align-items:center;"
-                    f"padding:12px 18px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
-                    f"<div style='font-family:Inter;font-size:13px;font-weight:500;color:#ccc;'>{icone} {nm}</div>"
-                    f"<div style='font-family:Inter;font-size:11px;color:{cor};'>{label}</div></div>"
-                )
-            sh += "</div>"
-            st.markdown(sh, unsafe_allow_html=True)
-
-            nome_sel = st.selectbox("Selecione o Aluno:", df_usuarios["nome"].dropna().unique().tolist(), key="coach_aluno_sel")
-            email_vinculado = df_usuarios[df_usuarios["nome"] == nome_sel]["email"].iloc[0]
-
-            # Calendário de treinos do aluno selecionado
-            if not df_coach.empty:
-                df_coach["email_aluno"] = df_coach["email_aluno"].astype(str).str.strip().str.lower()
-                hist_aluno_cal = df_coach[df_coach["email_aluno"] == email_vinculado].copy()
-                if not hist_aluno_cal.empty:
-                    hist_aluno_cal["data_dt"] = parsear_data(hist_aluno_cal["data"]).dt.date
-                    hist_aluno_cal = hist_aluno_cal.dropna(subset=["data_dt"])
-
-                    st.markdown(
-                        "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;"
-                        "text-transform:uppercase;margin:16px 0 8px;'>📅 Calendário de Treinos</p>",
-                        unsafe_allow_html=True
-                    )
-
-                    if "coach_cal_mes" not in st.session_state:
-                        st.session_state.coach_cal_mes = agora_brasilia_naive().replace(day=1)
-
-                    cp1, cp2, cp3 = st.columns([1, 3, 1])
-                    with cp1:
-                        if st.button("←", key="coach_cal_prev", use_container_width=True):
-                            st.session_state.coach_cal_mes = (st.session_state.coach_cal_mes - timedelta(days=1)).replace(day=1)
-                            st.rerun()
-                    with cp2:
-                        st.markdown(
-                            f"<p style='text-align:center;color:#ccc;font-family:Inter;font-size:13px;"
-                            f"font-weight:600;letter-spacing:1px;margin:10px 0;'>"
-                            f"{st.session_state.coach_cal_mes.strftime('%B %Y').upper()}</p>",
-                            unsafe_allow_html=True
-                        )
-                    with cp3:
-                        if st.session_state.coach_cal_mes < agora_brasilia_naive().replace(day=1):
-                            if st.button("→", key="coach_cal_next", use_container_width=True):
-                                st.session_state.coach_cal_mes = (
-                                    st.session_state.coach_cal_mes.replace(day=28) + timedelta(days=4)
-                                ).replace(day=1)
-                                st.rerun()
-
-                    import calendar as cal_lib
-                    mes_ref_c = st.session_state.coach_cal_mes
-                    ano_c, mes_c = mes_ref_c.year, mes_ref_c.month
-                    prim_sem_c = mes_ref_c.weekday()
-                    total_dias_c = cal_lib.monthrange(ano_c, mes_c)[1]
-
-                    vol_dia_c = {}
-                    for _, rh in hist_aluno_cal.iterrows():
-                        d = rh["data_dt"]
-                        if d.year == ano_c and d.month == mes_c:
-                            vol_dia_c[d.day] = vol_dia_c.get(d.day, 0) + float(rh.get("carga", 0))
-
-                    max_v_c = max(vol_dia_c.values()) if vol_dia_c else 1
-                    nomes_sem = ["SEG","TER","QUA","QUI","SEX","SAB","DOM"]
-                    cc = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;padding:16px;margin-bottom:16px;border:1px solid rgba(255,255,255,0.05);'>"
-                    cc += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:8px;'>"
-                    for n in nomes_sem:
-                        cc += f"<div style='text-align:center;color:#333;font-family:Inter;font-size:9px;letter-spacing:1px;font-weight:600;'>{n}</div>"
-                    cc += "</div><div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;'>"
-                    for _ in range(prim_sem_c):
-                        cc += "<div></div>"
-                    hoje_d_c = agora_brasilia_naive().date()
-                    for dia_c in range(1, total_dias_c + 1):
-                        data_d_c = datetime(ano_c, mes_c, dia_c).date()
-                        v_c = vol_dia_c.get(dia_c, 0)
-                        is_hj_c = data_d_c == hoje_d_c
-                        if v_c > 0:
-                            inten_c = v_c / max_v_c
-                            op_c = 0.3 + 0.7 * inten_c
-                            bg_c = f"rgba(249,192,61,{op_c:.2f})"
-                            ct_c = "#0A0A0A" if inten_c > 0.5 else "#F9C03D"
-                            bd_c = "1px solid rgba(249,192,61,0.5)"
-                        else:
-                            bg_c, ct_c, bd_c = "rgba(255,255,255,0.03)", "#333", "1px solid rgba(255,255,255,0.04)"
-                        anel_c = "box-shadow:0 0 0 2px #F9C03D;" if is_hj_c else ""
-                        cc += (f"<div style='aspect-ratio:1;display:flex;align-items:center;justify-content:center;"
-                               f"border-radius:8px;background:{bg_c};border:{bd_c};{anel_c}"
-                               f"font-family:Space Grotesk;font-size:11px;font-weight:700;color:{ct_c};'>{dia_c}</div>")
-                    cc += ("</div><div style='display:flex;align-items:center;gap:8px;margin-top:12px;"
-                           "padding-top:10px;border-top:1px solid rgba(255,255,255,0.04);'>"
-                           "<div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,0.3);'></div>"
-                           "<span style='color:#444;font-family:Inter;font-size:9px;'>Volume baixo</span>"
-                           "<div style='width:10px;height:10px;border-radius:3px;background:#F9C03D;margin-left:8px;'></div>"
-                           "<span style='color:#444;font-family:Inter;font-size:9px;'>Volume alto</span></div></div>")
-                    st.markdown(cc, unsafe_allow_html=True)
+                    st.info(f"{nome_sel} ainda nÃ£o registrou treinos.")
 
             st.divider()
-
-            # ABAS
-            if "coach_aba" not in st.session_state:
-                st.session_state.coach_aba = "evolucao_coach"
-
-            ca1, ca2, ca3, ca4, ca5, ca6, ca7 = st.columns(7)
-            for key, label, col in [("evolucao_coach","📈 Evolução",ca1),("checkins","📋 Check-ins",ca2),
-                                     ("treinos","🏋 Treinos",ca3),("mensagens","📣 Mensagens",ca4),
-                                     ("dieta","🥗 Dieta",ca5),("pagamentos","💰 Pagamentos",ca6),
-                                     ("relatorio","📄 Relatório",ca7)]:
-                with col:
-                    ativo = st.session_state.coach_aba == key
-                    if ativo:
-                        st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-                    if st.button(label, key=f"coach_tab_{key}", use_container_width=True):
-                        st.session_state.coach_aba = key
-                        st.rerun()
-                    if ativo:
-                        st.markdown("</div>", unsafe_allow_html=True)
-
-            st.markdown("---")
-
-            # ABA EVOLUÇÃO (COACH)
-            if st.session_state.coach_aba == "evolucao_coach":
-                if df_coach.empty:
-                    st.info(f"{nome_sel} ainda nao registrou treinos.")
+            st.markdown("### ðŸ“‹ HistÃ³rico de Check-ins")
+            try:
+                df_ci = ler_sem_cache("checkins")
+                if not df_ci.empty:
+                    df_ci['email'] = df_ci['email'].astype(str).str.strip().str.lower()
+                    df_ci['data'] = pd.to_datetime(df_ci['data'], dayfirst=True)
+                    df_f = df_ci[df_ci['email'] == email_vinculado].sort_values('data')
+                    if not df_f.empty:
+                        st.dataframe(df_f.sort_values('data', ascending=False),
+                            column_config={
+                                "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                                "email": None,
+                                "peso": st.column_config.NumberColumn("Peso (kg)", format="%.1f"),
+                                "feedback": "Relato do Aluno"
+                            }, hide_index=True, use_container_width=True)
+                        df_f['data_display'] = df_f['data'].dt.strftime('%d/%m/%Y')
+                        fig_p = px.line(df_f, x='data_display', y='peso', markers=True, title=f"EvoluÃ§Ã£o de Peso â€” {nome_sel}")
+                        fig_p.update_traces(line_color='#F9C03D')
+                        fig_p.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
+                        fig_p.update_xaxes(type='category', title="Data do Check-in")
+                        st.plotly_chart(fig_p, use_container_width=True)
+                    else:
+                        st.info(f"Nenhum check-in para {nome_sel}.")
                 else:
-                    df_coach["email_aluno"] = df_coach["email_aluno"].astype(str).str.strip().str.lower()
-                    df_aluno_ev = df_coach[df_coach["email_aluno"] == email_vinculado].copy()
-                    if df_aluno_ev.empty:
-                        st.info(f"{nome_sel} ainda nao registrou treinos.")
-                    else:
-                        df_aluno_ev["data"] = parsear_data(df_aluno_ev["data"])
-                        df_aluno_ev = df_aluno_ev.dropna(subset=["data"])
-                        df_aluno_ev["data_date"] = df_aluno_ev["data"].dt.date
-
-                        # RECORDES PESSOAIS
-                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>🏆 Recordes Pessoais</p>", unsafe_allow_html=True)
-                        prs_c = df_aluno_ev.groupby("exercicio").agg(
-                            carga_max=("carga", "max"),
-                            ultima_data=("data", "max")
-                        ).reset_index().sort_values("carga_max", ascending=False)
-                        pr_html_c = "<div style='background:rgba(28,27,27,0.9);border-radius:14px;overflow:hidden;margin-bottom:20px;'>"
-                        for _, r in prs_c.iterrows():
-                            pr_html_c += (
-                                f"<div class='pr-row'>"
-                                f"<div><div class='pr-nome'>{r['exercicio']}</div>"
-                                f"<div class='pr-data'>{r['ultima_data'].strftime('%d/%m/%Y')}</div></div>"
-                                f"<div class='pr-carga'>{r['carga_max']:.1f} kg</div></div>"
-                            )
-                        pr_html_c += "</div>"
-                        st.markdown(pr_html_c, unsafe_allow_html=True)
-
-                        # CALENDÁRIO DE TREINOS
-                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📅 Calendário de Treinos</p>", unsafe_allow_html=True)
-
-                        if "coach_ev_cal_mes" not in st.session_state:
-                            st.session_state.coach_ev_cal_mes = agora_brasilia_naive().replace(day=1)
-
-                        cp1, cp2, cp3 = st.columns([1, 3, 1])
-                        with cp1:
-                            if st.button("←", key="coach_ev_cal_prev", use_container_width=True):
-                                st.session_state.coach_ev_cal_mes = (st.session_state.coach_ev_cal_mes - timedelta(days=1)).replace(day=1)
-                                st.rerun()
-                        with cp2:
-                            st.markdown(
-                                f"<p style='text-align:center;color:#ccc;font-family:Inter;font-size:13px;font-weight:600;letter-spacing:1px;margin:10px 0;'>"
-                                f"{st.session_state.coach_ev_cal_mes.strftime('%B %Y').upper()}</p>",
-                                unsafe_allow_html=True
-                            )
-                        with cp3:
-                            if st.session_state.coach_ev_cal_mes < agora_brasilia_naive().replace(day=1):
-                                if st.button("→", key="coach_ev_cal_next", use_container_width=True):
-                                    st.session_state.coach_ev_cal_mes = (st.session_state.coach_ev_cal_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
-                                    st.rerun()
-
-                        import calendar as cal_lib_ev
-                        mes_ref_ev = st.session_state.coach_ev_cal_mes
-                        ano_ev, mes_ev = mes_ref_ev.year, mes_ref_ev.month
-                        prim_sem_ev = mes_ref_ev.weekday()
-                        total_dias_ev = cal_lib_ev.monthrange(ano_ev, mes_ev)[1]
-
-                        vol_dia_ev = {}
-                        for _, rh in df_aluno_ev.iterrows():
-                            d = rh["data_date"]
-                            if d.year == ano_ev and d.month == mes_ev:
-                                vol_dia_ev[d.day] = vol_dia_ev.get(d.day, 0) + float(rh.get("carga", 0))
-
-                        max_v_ev = max(vol_dia_ev.values()) if vol_dia_ev else 1
-                        nomes_sem_ev = ["SEG","TER","QUA","QUI","SEX","SAB","DOM"]
-                        ce = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;padding:16px;margin-bottom:16px;border:1px solid rgba(255,255,255,0.05);'>"
-                        ce += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:8px;'>"
-                        for n in nomes_sem_ev:
-                            ce += f"<div style='text-align:center;color:#333;font-family:Inter;font-size:9px;letter-spacing:1px;font-weight:600;'>{n}</div>"
-                        ce += "</div><div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;'>"
-                        for _ in range(prim_sem_ev):
-                            ce += "<div></div>"
-                        hoje_d_ev = agora_brasilia_naive().date()
-                        for dia_ev in range(1, total_dias_ev + 1):
-                            data_d_ev = datetime(ano_ev, mes_ev, dia_ev).date()
-                            v_ev = vol_dia_ev.get(dia_ev, 0)
-                            is_hj_ev = data_d_ev == hoje_d_ev
-                            if v_ev > 0:
-                                inten_ev = v_ev / max_v_ev
-                                op_ev = 0.3 + 0.7 * inten_ev
-                                bg_ev = f"rgba(249,192,61,{op_ev:.2f})"
-                                ct_ev = "#0A0A0A" if inten_ev > 0.5 else "#F9C03D"
-                                bd_ev = "1px solid rgba(249,192,61,0.5)"
-                            else:
-                                bg_ev, ct_ev, bd_ev = "rgba(255,255,255,0.03)", "#333", "1px solid rgba(255,255,255,0.04)"
-                            anel_ev = "box-shadow:0 0 0 2px #F9C03D;" if is_hj_ev else ""
-                            ce += (f"<div style='aspect-ratio:1;display:flex;align-items:center;justify-content:center;"
-                                   f"border-radius:8px;background:{bg_ev};border:{bd_ev};{anel_ev}"
-                                   f"font-family:Space Grotesk;font-size:11px;font-weight:700;color:{ct_ev};'>{dia_ev}</div>")
-                        ce += ("</div><div style='display:flex;align-items:center;gap:8px;margin-top:12px;"
-                               "padding-top:10px;border-top:1px solid rgba(255,255,255,0.04);'>"
-                               "<div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,0.3);'></div>"
-                               "<span style='color:#444;font-family:Inter;font-size:9px;'>Volume baixo</span>"
-                               "<div style='width:10px;height:10px;border-radius:3px;background:#F9C03D;margin-left:8px;'></div>"
-                               "<span style='color:#444;font-family:Inter;font-size:9px;'>Volume alto</span></div></div>")
-                        st.markdown(ce, unsafe_allow_html=True)
-
-                        # DETALHE DO DIA
-                        dias_treinados_ev = sorted(vol_dia_ev.keys())
-                        if dias_treinados_ev:
-                            st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin:16px 0 8px;'>🔍 Detalhe do Dia</p>", unsafe_allow_html=True)
-                            dia_sel_ev = st.select_slider("Selecione um dia treinado:", options=dias_treinados_ev, key="coach_ev_dia_sel", label_visibility="collapsed")
-                            data_sel_ev = datetime(ano_ev, mes_ev, dia_sel_ev).date()
-                            df_dia_ev = df_aluno_ev[df_aluno_ev["data_date"] == data_sel_ev].copy()
-                            if not df_dia_ev.empty:
-                                treino_do_dia_ev = str(df_dia_ev.iloc[0].get("treino","")) if "treino" in df_dia_ev.columns else ""
-                                det_html = (
-                                    f"<div style='background:rgba(18,17,17,0.95);border-radius:16px;overflow:hidden;"
-                                    f"margin-bottom:16px;border:1px solid rgba(255,255,255,0.05);'>"
-                                    f"<div style='padding:12px 18px 8px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
-                                    f"<span style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;'>"
-                                    f"📅 {data_sel_ev.strftime('%d/%m/%Y')}"
-                                    f"{'  •  ' + treino_do_dia_ev if treino_do_dia_ev and treino_do_dia_ev != 'nan' else ''}"
-                                    f"</span></div>"
-                                )
-                                for _, row_d in df_dia_ev.sort_values("exercicio").iterrows():
-                                    carga_d = float(row_d.get("carga", 0))
-                                    ex_d = str(row_d.get("exercicio",""))
-                                    det_html += (
-                                        f"<div style='display:flex;justify-content:space-between;align-items:center;"
-                                        f"padding:11px 18px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
-                                        f"<div style='color:#ccc;font-family:Inter;font-size:13px;font-weight:500;'>{ex_d}</div>"
-                                        f"<div style='color:#F9C03D;font-family:Space Grotesk;font-weight:700;font-size:1rem;'>{carga_d:.1f} kg</div></div>"
-                                    )
-                                det_html += "</div>"
-                                st.markdown(det_html, unsafe_allow_html=True)
-
-                        # PROGRESSÃO DE CARGA
-                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📊 Progressão de Carga</p>", unsafe_allow_html=True)
-                        col_per_ev, col_tr_ev = st.columns(2)
-                        with col_per_ev:
-                            periodo_ev = st.selectbox("Período:", ["Ultimas 4 semanas","Ultimo mes","Ultimos 3 meses","Tudo"], key="coach_ev_periodo")
-                        hoje_dt_ev = pd.Timestamp(hoje_ref)
-                        if periodo_ev == "Ultimas 4 semanas":  corte_ev = hoje_dt_ev - pd.Timedelta(weeks=4)
-                        elif periodo_ev == "Ultimo mes":        corte_ev = hoje_dt_ev - pd.Timedelta(days=30)
-                        elif periodo_ev == "Ultimos 3 meses":   corte_ev = hoje_dt_ev - pd.Timedelta(days=90)
-                        else:                                   corte_ev = pd.Timestamp("2000-01-01")
-                        df_p_ev = df_aluno_ev[df_aluno_ev["data"] >= corte_ev]
-                        if "treino" in df_p_ev.columns:
-                            treinos_disp_ev = df_p_ev["treino"].dropna().unique().tolist()
-                            with col_tr_ev:
-                                treino_sel_ev = st.selectbox("Treino:", ["Todos"] + treinos_disp_ev, key="coach_ev_treino_sel")
-                            if treino_sel_ev != "Todos":
-                                df_p_ev = df_p_ev[df_p_ev["treino"] == treino_sel_ev]
-                        exercicios_disp_ev = df_p_ev["exercicio"].dropna().unique().tolist()
-                        if not exercicios_disp_ev:
-                            st.info("Nenhum exercício encontrado para os filtros selecionados.")
-                        else:
-                            exercicio_sel_ev = st.selectbox("Exercício:", exercicios_disp_ev, key="coach_ev_ex_sel")
-                            df_prog_ev = df_p_ev[df_p_ev["exercicio"] == exercicio_sel_ev].sort_values("data")
-                            df_prog_ev["data_display"] = df_prog_ev["data"].dt.strftime("%d/%m/%Y")
-                            fig_ev = px.line(df_prog_ev, x="data_display", y="carga", markers=True)
-                            fig_ev.update_traces(line_color="#F9C03D", marker=dict(color="#F9C03D", size=8))
-                            fig_ev.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                                                 font_color="white", margin=dict(l=0,r=0,t=10,b=0),
-                                                 xaxis_title="", yaxis_title="kg")
-                            fig_ev.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.05)")
-                            fig_ev.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
-                            st.plotly_chart(fig_ev, use_container_width=True)
-
-            # ABA CHECKINS
-            elif st.session_state.coach_aba == "checkins":
-                try:
-                    df_ci = ler_sem_cache("checkins")
-                    if df_ci.empty:
-                        st.info("Nenhum check-in registrado.")
-                    else:
-                        df_ci["email"] = df_ci["email"].astype(str).str.strip().str.lower()
-                        df_ci["data"]  = parsear_data(df_ci["data"])
-                        df_f = df_ci[df_ci["email"] == email_vinculado].sort_values("data", ascending=False)
-                        if df_f.empty:
-                            st.info(f"Nenhum check-in para {nome_sel}.")
-                        else:
-                            palavras_neg = ["dor","cansado","cansaco","mal","ruim","fraco","enjoo","lesao","dificil"]
-                            alertas = []
-                            if len(df_f) >= 2:
-                                delta_peso = float(df_f.iloc[0]["peso"]) - float(df_f.iloc[1]["peso"])
-                                if abs(delta_peso) >= 2:
-                                    sinal = "📉" if delta_peso < 0 else "📈"
-                                    alertas.append(f"{sinal} Variacao de {delta_peso:+.1f}kg no ultimo check-in")
-                            for _, ci_row in df_f.iterrows():
-                                fb = str(ci_row.get("feedback","")).lower()
-                                if any(p in fb for p in palavras_neg):
-                                    dt_str = ci_row["data"].strftime("%d/%m/%Y") if pd.notnull(ci_row["data"]) else "?"
-                                    alertas.append(f"⚠️ Feedback negativo em {dt_str}")
-                                    break
-                            if pd.notnull(df_f.iloc[0]["data"]):
-                                dias_sem = (hoje_ref - df_f.iloc[0]["data"].date()).days
-                                if dias_sem > 7:
-                                    alertas.append(f"🕐 Sem check-in ha {dias_sem} dias")
-                            if alertas:
-                                ah = "<div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);border-radius:14px;padding:14px 18px;margin-bottom:16px;'>"
-                                ah += "<p style='color:#f87171;font-family:Inter;font-size:9px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;font-weight:700;'>ALERTAS</p>"
-                                for a in alertas:
-                                    ah += f"<p style='color:#f87171;font-family:Inter;font-size:12px;margin:4px 0;'>{a}</p>"
-                                ah += "</div>"
-                                st.markdown(ah, unsafe_allow_html=True)
-                            st.dataframe(
-                                df_f.rename(columns={"data":"Data","peso":"Peso (kg)","feedback":"Relato","email":"Email"}),
-                                column_config={
-                                    "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                                    "Email": None,
-                                    "Peso (kg)": st.column_config.NumberColumn("Peso (kg)", format="%.1f"),
-                                    "Relato": "Relato do Aluno"
-                                }, hide_index=True, use_container_width=True
-                            )
-
-                            df_f2 = df_f.sort_values("data")
-                            df_f2["data_display"] = df_f2["data"].dt.strftime("%d/%m/%Y")
-                            fig_p = px.line(df_f2, x="data_display", y="peso", markers=True)
-                            fig_p.update_traces(line_color="#F9C03D", marker=dict(color="#F9C03D", size=8))
-                            fig_p.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                                                font_color="white", margin=dict(l=0,r=0,t=10,b=0),
-                                                xaxis_title="", yaxis_title="kg")
-                            fig_p.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.05)")
-                            fig_p.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
-                            st.plotly_chart(fig_p, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Erro check-ins: {e}")
-
-            # ABA TREINOS
-            elif st.session_state.coach_aba == "treinos":
-                try:
-                    df_tr = ler_sem_cache("planilha_treinos")
-                    df_tr["email_aluno"] = df_tr["email_aluno"].astype(str).str.strip().str.lower()
-                    # Garante coluna status
-                    if "status" not in df_tr.columns:
-                        df_tr["status"] = "ativo"
-                    df_tr["status"] = df_tr["status"].fillna("ativo")
-                    df_aluno_tr = df_tr[
-                        (df_tr["email_aluno"] == email_vinculado) &
-                        (df_tr["status"] == "ativo")
-                    ].copy()
-                    df_aluno_arq = df_tr[
-                        (df_tr["email_aluno"] == email_vinculado) &
-                        (df_tr["status"] == "arquivada")
-                    ].copy()
-
-                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;'>PROTOCOLOS ATIVOS</p>", unsafe_allow_html=True)
-
-                    if not df_aluno_tr.empty:
-                        fichas_ativas = df_aluno_tr["treino_nome"].unique().tolist()
-                        col_fsel, col_farq = st.columns([3, 1])
-                        with col_fsel:
-                            ficha_sel = st.selectbox("Ficha:", fichas_ativas, key="coach_ficha_sel")
-                        with col_farq:
-                            st.markdown("<div style='margin-top:28px;'>", unsafe_allow_html=True)
-                            if st.button("📦 Arquivar", key="arquivar_ficha", use_container_width=True):
-                                df_full = ler_sem_cache("planilha_treinos")
-                                df_full["email_aluno"] = df_full["email_aluno"].astype(str).str.strip().str.lower()
-                                if "status" not in df_full.columns:
-                                    df_full["status"] = "ativo"
-                                mask_arq = ((df_full["email_aluno"] == email_vinculado) &
-                                            (df_full["treino_nome"] == ficha_sel))
-                                df_full.loc[mask_arq, "status"] = "arquivada"
-                                conn.update(worksheet="planilha_treinos", data=df_full)
-                                st.cache_data.clear()
-                                st.toast(f"Ficha '{ficha_sel}' arquivada.", icon="📦")
-                                st.rerun()
-                            st.markdown("</div>", unsafe_allow_html=True)
-
-                        df_ficha = df_aluno_tr[df_aluno_tr["treino_nome"] == ficha_sel].reset_index(drop=True)
-                        exercicios_editados = []
-                        for i, row_ex in df_ficha.iterrows():
-                            with st.expander(f"{i+1}. {row_ex['exercicio']}", expanded=False):
-                                ce1, ce2, ce3 = st.columns(3)
-                                with ce1:
-                                    novo_nome = st.text_input("Exercício", value=str(row_ex["exercicio"]), key=f"ex_nome_{i}")
-                                with ce2:
-                                    nova_serie = st.number_input("Series", min_value=1, max_value=20,
-                                        value=int(float(row_ex["series"])) if pd.notnull(row_ex.get("series")) else 3, key=f"ex_serie_{i}")
-                                with ce3:
-                                    nova_rep = st.number_input("Reps", min_value=1, max_value=100,
-                                        value=int(float(row_ex["reps"])) if pd.notnull(row_ex.get("reps")) else 10, key=f"ex_rep_{i}")
-                                novo_video = st.text_input("URL do Video", value=str(row_ex.get("video_url","")) if pd.notnull(row_ex.get("video_url")) else "", key=f"ex_video_{i}")
-                                if st.button("Remover", key=f"del_ex_{i}", use_container_width=True):
-                                    df_full = ler_sem_cache("planilha_treinos")
-                                    df_full["email_aluno"] = df_full["email_aluno"].astype(str).str.strip().str.lower()
-                                    mask_del = ((df_full["email_aluno"] == email_vinculado) &
-                                                (df_full["treino_nome"] == ficha_sel) &
-                                                (df_full["exercicio"] == row_ex["exercicio"]))
-                                    conn.update(worksheet="planilha_treinos", data=df_full[~mask_del].reset_index(drop=True))
-                                    st.cache_data.clear()
-                                    st.toast("Exercicio removido.", icon="🗑️")
-                                    st.rerun()
-                                exercicios_editados.append({"email_aluno": email_vinculado, "treino_nome": ficha_sel,
-                                    "exercicio": novo_nome, "series": nova_serie, "reps": nova_rep,
-                                    "video_url": novo_video, "status": "ativo"})
-                        st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-                        if st.button("Salvar Alteracoes da Ficha", key="salvar_ficha", use_container_width=True):
-                            df_full = ler_sem_cache("planilha_treinos")
-                            df_full["email_aluno"] = df_full["email_aluno"].astype(str).str.strip().str.lower()
-                            mask_f = (df_full["email_aluno"] == email_vinculado) & (df_full["treino_nome"] == ficha_sel)
-                            df_full = pd.concat([df_full[~mask_f], pd.DataFrame(exercicios_editados)], ignore_index=True)
-                            conn.update(worksheet="planilha_treinos", data=df_full)
-                            st.cache_data.clear()
-                            st.toast("Ficha salva!", icon="✅")
-                            st.rerun()
-                        st.markdown("</div>", unsafe_allow_html=True)
-                    else:
-                        st.info("Nenhum protocolo ativo para este aluno.")
-
-                    # Fichas arquivadas
-                    if not df_aluno_arq.empty:
-                        st.markdown("---")
-                        st.markdown("<p style='color:#555;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📦 Fichas Arquivadas</p>", unsafe_allow_html=True)
-                        for ficha_arq in df_aluno_arq["treino_nome"].unique():
-                            col_fa, col_rest = st.columns([3, 1])
-                            with col_fa:
-                                st.markdown(f"<p style='color:#444;font-family:Inter;font-size:13px;margin:8px 0;'>{ficha_arq}</p>", unsafe_allow_html=True)
-                            with col_rest:
-                                if st.button("↩ Restaurar", key=f"rest_{ficha_arq}", use_container_width=True):
-                                    df_full = ler_sem_cache("planilha_treinos")
-                                    df_full["email_aluno"] = df_full["email_aluno"].astype(str).str.strip().str.lower()
-                                    if "status" not in df_full.columns:
-                                        df_full["status"] = "ativo"
-                                    mask_rest = ((df_full["email_aluno"] == email_vinculado) &
-                                                 (df_full["treino_nome"] == ficha_arq))
-                                    df_full.loc[mask_rest, "status"] = "ativo"
-                                    conn.update(worksheet="planilha_treinos", data=df_full)
-                                    st.cache_data.clear()
-                                    st.toast(f"Ficha '{ficha_arq}' restaurada!", icon="✅")
-                                    st.rerun()
-
-                    st.markdown("---")
-                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;'>ADICIONAR EXERCICIO</p>", unsafe_allow_html=True)
-                    with st.form("form_add_ex", clear_on_submit=True):
-                        cn1, cn2 = st.columns(2)
-                        with cn1:
-                            nome_ficha_nova = st.text_input("Nome da Ficha", placeholder="Ex: Treino A")
-                        with cn2:
-                            nome_ex_novo = st.text_input("Exercício", placeholder="Ex: Supino Reto")
-                        cn3, cn4 = st.columns(2)
-                        with cn3:
-                            series_novo = st.number_input("Series", min_value=1, max_value=20, value=4)
-                        with cn4:
-                            reps_novo = st.number_input("Reps", min_value=1, max_value=100, value=12)
-                        video_novo = st.text_input("URL do Video (opcional)")
-                        if st.form_submit_button("ADICIONAR"):
-                            if nome_ficha_nova and nome_ex_novo:
-                                df_full = ler_sem_cache("planilha_treinos")
-                                novo_ex = pd.DataFrame([{"email_aluno": email_vinculado, "treino_nome": nome_ficha_nova,
-                                    "exercicio": nome_ex_novo, "series": series_novo, "reps": reps_novo,
-                                    "video_url": video_novo, "status": "ativo"}])
-                                conn.update(worksheet="planilha_treinos", data=pd.concat([df_full, novo_ex], ignore_index=True))
-                                st.cache_data.clear()
-                                st.toast(f"{nome_ex_novo} adicionado!", icon="💪")
-                                st.rerun()
-                            else:
-                                st.warning("Preencha o nome da ficha e do exercicio.")
-
-                except Exception as e:
-                    st.error(f"Erro treinos: {e}")
-
-            # ABA MENSAGENS
-            elif st.session_state.coach_aba == "mensagens":
-                try:
-                    df_u_msg = ler_sem_cache("usuarios")
-                    df_u_msg["email"] = df_u_msg["email"].astype(str).str.strip().str.lower()
-                    linha_msg = df_u_msg[df_u_msg["email"] == email_vinculado]
-                    msg_atual = ""
-                    if not linha_msg.empty and "mensagem_coach" in df_u_msg.columns:
-                        msg_atual = str(linha_msg.iloc[0].get("mensagem_coach","")).strip()
-                        if msg_atual.lower() == "nan":
-                            msg_atual = ""
-                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;'>MENSAGEM ATIVA</p>", unsafe_allow_html=True)
-                    if msg_atual:
-                        st.markdown(f"<div class='coach-msg'><div class='coach-msg-label'>Mensagem atual para {nome_sel}</div><div class='coach-msg-texto'>{msg_atual}</div></div>", unsafe_allow_html=True)
-                    else:
-                        st.markdown("<p style='color:#444;font-family:Inter;font-size:12px;'>Nenhuma mensagem ativa para este aluno.</p>", unsafe_allow_html=True)
-                    nova_msg = st.text_area("Nova mensagem:", placeholder=f"Escreva para {nome_sel}...", height=100, key="nova_msg_coach")
-                    cm1, cm2 = st.columns(2)
-                    with cm1:
-                        st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-                        if st.button("Enviar Mensagem", key="btn_enviar_msg", use_container_width=True):
-                            if nova_msg.strip():
-                                df_u_upd = ler_sem_cache("usuarios")
-                                df_u_upd["email"] = df_u_upd["email"].astype(str).str.strip().str.lower()
-                                if "mensagem_coach" not in df_u_upd.columns:
-                                    df_u_upd["mensagem_coach"] = ""
-                                df_u_upd.loc[df_u_upd["email"] == email_vinculado, "mensagem_coach"] = nova_msg.strip()
-                                conn.update(worksheet="usuarios", data=df_u_upd)
-                                st.cache_data.clear()
-                                st.toast(f"Mensagem enviada para {nome_sel}!", icon="✅")
-                                st.rerun()
-                            else:
-                                st.warning("Digite uma mensagem antes de enviar.")
-                        st.markdown("</div>", unsafe_allow_html=True)
-                    with cm2:
-                        if st.button("Limpar Mensagem", key="btn_limpar_msg", use_container_width=True):
-                            df_u_upd = ler_sem_cache("usuarios")
-                            df_u_upd["email"] = df_u_upd["email"].astype(str).str.strip().str.lower()
-                            if "mensagem_coach" in df_u_upd.columns:
-                                df_u_upd.loc[df_u_upd["email"] == email_vinculado, "mensagem_coach"] = ""
-                                conn.update(worksheet="usuarios", data=df_u_upd)
-                                st.cache_data.clear()
-                                st.toast("Mensagem removida.", icon="🗑️")
-                                st.rerun()
-                except Exception as e:
-                    st.error(f"Erro mensagens: {e}")
-
-            # ABA DIETA (COACH)
-            elif st.session_state.coach_aba == "dieta":
-                try:
-                    try:
-                        df_dieta = ler_sem_cache("dietas")
-                        df_dieta["email_aluno"] = df_dieta["email_aluno"].astype(str).str.strip().str.lower()
-                    except:
-                        df_dieta = pd.DataFrame(columns=["email_aluno","refeicao","descricao","calorias"])
-
-                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:16px;'>🥗 DIETA DE " + nome_sel.upper() + "</p>", unsafe_allow_html=True)
-
-                    refeicoes_ordem = ["REF 1","REF 2","REF 3","REF 4","REF 5","REF 6","ÁGUA"]
-                    dieta_aluno = df_dieta[df_dieta["email_aluno"] == email_vinculado] if not df_dieta.empty else pd.DataFrame()
-
-                    with st.form("form_dieta_coach", clear_on_submit=False):
-                        campos = {}
-                        for ref in refeicoes_ordem:
-                            linha = dieta_aluno[dieta_aluno["refeicao"] == ref] if not dieta_aluno.empty else pd.DataFrame()
-                            desc_atual = str(linha.iloc[0]["descricao"]).strip() if not linha.empty and pd.notnull(linha.iloc[0]["descricao"]) else ""
-                            cal_atual  = str(linha.iloc[0]["calorias"]).strip()  if not linha.empty and "calorias" in linha.columns and pd.notnull(linha.iloc[0]["calorias"]) else ""
-                            with st.expander(f"🍽️ {ref}", expanded=bool(desc_atual)):
-                                cd, cc = st.columns([4, 1])
-                                with cd:
-                                    campos[ref] = {"desc": st.text_area(f"Alimentos — {ref}", value=desc_atual, height=100, key=f"diet_{ref}_desc", label_visibility="collapsed", placeholder=f"Descreva os alimentos de {ref}...")}
-                                with cc:
-                                    campos[ref]["cal"] = st.text_input("kcal", value=cal_atual, key=f"diet_{ref}_cal", placeholder="ex: 450")
-
-                        submitted_dieta = st.form_submit_button("💾 SALVAR DIETA", use_container_width=True)
-                        if submitted_dieta:
-                            df_base = ler_sem_cache("dietas") if True else pd.DataFrame()
-                            try:
-                                df_base["email_aluno"] = df_base["email_aluno"].astype(str).str.strip().str.lower()
-                                df_base = df_base[df_base["email_aluno"] != email_vinculado]
-                            except:
-                                df_base = pd.DataFrame(columns=["email_aluno","refeicao","descricao","calorias"])
-                            novas = []
-                            for ref, vals in campos.items():
-                                if vals["desc"].strip():
-                                    novas.append({"email_aluno": email_vinculado, "refeicao": ref,
-                                                  "descricao": vals["desc"].strip(), "calorias": vals["cal"].strip()})
-                            if novas:
-                                df_final = pd.concat([df_base, pd.DataFrame(novas)], ignore_index=True)
-                                conn.update(worksheet="dietas", data=df_final)
-                                st.cache_data.clear()
-                                st.toast(f"Dieta de {nome_sel} salva!", icon="🥗")
-                                st.rerun()
-                            else:
-                                st.warning("Preencha pelo menos uma refeição.")
-                except Exception as e:
-                    st.error(f"Erro dieta: {e}")
-
-
-            # ABA PAGAMENTOS (COACH)
-            elif st.session_state.coach_aba == "pagamentos":
-                try:
-                    try:
-                        df_pag = ler_sem_cache("pagamentos")
-                        if df_pag.empty or "email_aluno" not in df_pag.columns:
-                            df_pag = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
-                        df_pag["email_aluno"] = df_pag["email_aluno"].astype(str).str.strip().str.lower()
-                    except:
-                        df_pag = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
-
-                    hoje_pag = agora_brasilia_naive().date()
-
-                    # Visão geral de todos os alunos
-                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>💰 STATUS DE PAGAMENTOS</p>", unsafe_allow_html=True)
-                    
-                    if not df_pag.empty and not df_usuarios.empty:
-                        status_pag_html = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;overflow:hidden;margin-bottom:20px;border:1px solid rgba(255,255,255,0.05);'>"
-                        for _, row_u in df_usuarios.dropna(subset=["nome"]).iterrows():
-                            em_u = str(row_u["email"]).strip().lower()
-                            nm_u = str(row_u.get("nome", em_u))
-                            pag_u = df_pag[df_pag["email_aluno"] == em_u]
-                            if pag_u.empty:
-                                cor_u, icone_u, label_u = "#555", "⚪", "Sem cadastro"
-                            else:
-                                row_p = pag_u.iloc[-1]
-                                status_u = str(row_p.get("status","")).strip().lower()
-                                venc_str = str(row_p.get("vencimento","")).strip()
-                                try:
-                                    import re as _re
-                                    import calendar as _cal2
-                                    venc_str_clean = str(venc_str).strip()
-                                    _m = _re.match(r'^\.?(\d+)', venc_str_clean.replace(",","."))
-                                    if _m and 1 <= int(float(venc_str_clean.replace(",","."))) <= 28:
-                                        dia_v = int(float(venc_str_clean.replace(",",".")))
-                                        if status_u == "pago":
-                                            venc_dt = proximo_vencimento_futuro(dia_v)
-                                        else:
-                                            _ult = _cal2.monthrange(hoje_pag.year, hoje_pag.month)[1]
-                                            venc_dt = hoje_pag.replace(day=min(dia_v, _ult))
-                                    elif venc_str_clean and venc_str_clean.lower() not in ("nan",""):
-                                        dt_p = parsear_data(pd.Series([venc_str_clean])).iloc[0]
-                                        if pd.isnull(dt_p):
-                                            raise ValueError("data inválida")
-                                        venc_dt = dt_p.date()
-                                    else:
-                                        raise ValueError("sem data")
-                                    dias_venc = (venc_dt - hoje_pag).days
-                                    if status_u == "pago":
-                                        cor_u, icone_u, label_u = "#4ade80", "🟢", f"Pago ✓ — próx. {venc_dt.strftime('%d/%m/%Y')}"
-                                    elif dias_venc <= -3:
-                                        cor_u, icone_u, label_u = "#f87171", "🔴", f"BLOQUEADO — {abs(dias_venc)}d atraso"
-                                    elif dias_venc < 0:
-                                        cor_u, icone_u, label_u = "#f87171", "🔴", f"ATRASADO {abs(dias_venc)} dia{'s' if abs(dias_venc)>1 else ''}"
-                                    elif dias_venc <= 5:
-                                        cor_u, icone_u, label_u = "#F9C03D", "🟡", f"Vence em {dias_venc} dia{'s' if dias_venc>1 else ''}"
-                                    else:
-                                        cor_u, icone_u, label_u = "#4ade80", "🟢", f"Em dia — vence {venc_dt.strftime('%d/%m/%Y')}"
-                                except:
-                                    cor_u, icone_u, label_u = "#555", "⚪", "Sem vencimento"
-                            status_pag_html += (
-                                f"<div style='display:flex;justify-content:space-between;align-items:center;"
-                                f"padding:12px 18px;border-bottom:1px solid rgba(255,255,255,0.04);'>"
-                                f"<div style='font-family:Inter;font-size:13px;font-weight:500;color:#ccc;'>{icone_u} {nm_u}</div>"
-                                f"<div style='font-family:Inter;font-size:11px;color:{cor_u};'>{label_u}</div></div>"
-                            )
-                        status_pag_html += "</div>"
-                        st.markdown(status_pag_html, unsafe_allow_html=True)
-
-                    st.divider()
-
-                    # Gerenciar pagamento do aluno selecionado
-                    st.markdown(f"<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:12px;'>⚙️ GERENCIAR — {nome_sel.upper()}</p>", unsafe_allow_html=True)
-
-                    pag_aluno = df_pag[df_pag["email_aluno"] == email_vinculado] if not df_pag.empty else pd.DataFrame()
-                    valor_atual = str(pag_aluno.iloc[-1].get("valor","")) if not pag_aluno.empty else ""
-                    venc_atual  = str(pag_aluno.iloc[-1].get("vencimento","")) if not pag_aluno.empty else ""
-                    pix_atual   = limpar_pix(pag_aluno.iloc[-1].get("chave_pix","")) if not pag_aluno.empty else ""
-                    status_atual = str(pag_aluno.iloc[-1].get("status","pendente")) if not pag_aluno.empty else "pendente"
-
-                    # Extrai dia do mês do vencimento salvo
-                    dia_venc_atual = 10
-                    if not pag_aluno.empty:
-                        try:
-                            venc_salvo = str(pag_aluno.iloc[-1].get("vencimento","")).strip()
-                            if venc_salvo.isdigit() and int(venc_salvo) > 0:
-                                dia_venc_atual = int(venc_salvo)
-                            elif venc_salvo and venc_salvo.lower() != "nan":
-                                dt_parsed = parsear_data(pd.Series([venc_salvo])).iloc[0]
-                                if pd.notnull(dt_parsed):
-                                    dia_venc_atual = int(dt_parsed.day)
-                        except:
-                            pass
-                    dia_venc_atual = max(1, min(28, int(dia_venc_atual)))
-
-                    with st.form("form_pag_coach", clear_on_submit=False):
-                        cp1, cp2 = st.columns(2)
-                        with cp1:
-                            valor_novo = st.text_input("Valor (R$)", value=valor_atual, placeholder="Ex: 150.00")
-                        with cp2:
-                            dia_venc_novo = st.number_input(
-                                "Dia de vencimento (recorrente)",
-                                min_value=1, max_value=28,
-                                value=int(dia_venc_atual),
-                                help="O app calcula automaticamente o próximo vencimento todo mês"
-                            )
-                        pix_novo = st.text_input("Chave Pix", value=pix_atual, placeholder="CPF, e-mail ou telefone")
-
-                        submitted_pag = st.form_submit_button("💾 SALVAR CADASTRO", use_container_width=True)
-                        if submitted_pag:
-                            try:
-                                df_pag_full = ler_sem_cache("pagamentos")
-                                try:
-                                    df_pag_full["email_aluno"] = df_pag_full["email_aluno"].astype(str).str.strip().str.lower()
-                                    df_pag_full = df_pag_full[df_pag_full["email_aluno"] != email_vinculado]
-                                except:
-                                    df_pag_full = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
-                                # Mantém status e data_pagamento existentes ao salvar cadastro
-                                status_manter = status_atual if status_atual in ["pendente","pago","atrasado"] else "pendente"
-                                data_pag_manter = str(pag_aluno.iloc[-1].get("data_pagamento","")) if not pag_aluno.empty else ""
-                                nova_linha = pd.DataFrame([{
-                                    "email_aluno": email_vinculado,
-                                    "valor": valor_novo.strip(),
-                                    "vencimento": str(int(dia_venc_novo)),
-                                    "status": status_manter,
-                                    "data_pagamento": data_pag_manter,
-                                    "chave_pix": pix_novo.strip()
-                                }])
-                                conn.update(worksheet="pagamentos", data=pd.concat([df_pag_full, nova_linha], ignore_index=True))
-                                st.cache_data.clear()
-                                st.toast(f"Cadastro de {nome_sel} salvo! Vence todo dia {int(dia_venc_novo)}.", icon="💾")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Erro ao salvar: {e}")
-
-                    # Botão PAGO com confirmação
-                    st.markdown("<div style='margin-top:8px;'></div>", unsafe_allow_html=True)
-                    col_pago, col_desfazer = st.columns(2)
-                    with col_pago:
-                        st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-                        if st.button("✓ PAGO", key="btn_marcar_pago", use_container_width=True):
-                            st.session_state["confirmar_pago"] = email_vinculado
-                        st.markdown('</div>', unsafe_allow_html=True)
-
-                    # Dialog de confirmação
-                    if st.session_state.get("confirmar_pago") == email_vinculado:
-                        st.markdown(f"""
-                            <div style='background:rgba(74,222,128,0.07);border:1px solid rgba(74,222,128,0.25);
-                            border-radius:14px;padding:16px 18px;margin-top:8px;'>
-                                <p style='color:#4ade80;font-family:Inter;font-size:11px;font-weight:700;
-                                letter-spacing:2px;text-transform:uppercase;margin:0 0 6px;'>Confirmar pagamento</p>
-                                <p style='color:#aaa;font-family:Inter;font-size:13px;margin:0 0 12px;'>
-                                Registrar pagamento de <b style='color:#fff;'>{nome_sel}</b> na data de hoje?</p>
-                            </div>
-                        """, unsafe_allow_html=True)
-                        cc1, cc2 = st.columns(2)
-                        with cc1:
-                            st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-                            if st.button("✓ Confirmar", key="btn_confirmar_pago", use_container_width=True):
-                                try:
-                                    df_pag_full = ler_sem_cache("pagamentos")
-                                    try:
-                                        df_pag_full["email_aluno"] = df_pag_full["email_aluno"].astype(str).str.strip().str.lower()
-                                        df_pag_full = df_pag_full[df_pag_full["email_aluno"] != email_vinculado]
-                                    except:
-                                        df_pag_full = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
-                                    hoje_str = agora_brasilia_naive().strftime("%d/%m/%Y")
-                                    nova_linha = pd.DataFrame([{
-                                        "email_aluno": email_vinculado,
-                                        "valor": valor_atual,
-                                        "vencimento": str(int(dia_venc_atual)),
-                                        "status": "pago",
-                                        "data_pagamento": hoje_str,
-                                        "chave_pix": pix_atual
-                                    }])
-                                    conn.update(worksheet="pagamentos", data=pd.concat([df_pag_full, nova_linha], ignore_index=True))
-                                    st.cache_data.clear()
-                                    st.session_state.pop("confirmar_pago", None)
-                                    st.toast(f"✅ Pagamento de {nome_sel} registrado em {hoje_str}!", icon="✅")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Erro ao marcar como pago: {e}")
-                            st.markdown('</div>', unsafe_allow_html=True)
-                        with cc2:
-                            if st.button("✕ Cancelar", key="btn_cancelar_pago", use_container_width=True):
-                                st.session_state.pop("confirmar_pago", None)
-                                st.rerun()
-                    with col_desfazer:
-                        if st.button("↩ Desfazer / Pendente", key="btn_desfazer_pago", use_container_width=True):
-                            try:
-                                df_pag_full = ler_sem_cache("pagamentos")
-                                try:
-                                    df_pag_full["email_aluno"] = df_pag_full["email_aluno"].astype(str).str.strip().str.lower()
-                                    df_pag_full = df_pag_full[df_pag_full["email_aluno"] != email_vinculado]
-                                except:
-                                    df_pag_full = pd.DataFrame(columns=["email_aluno","valor","vencimento","status","data_pagamento","chave_pix"])
-                                nova_linha = pd.DataFrame([{
-                                    "email_aluno": email_vinculado,
-                                    "valor": valor_atual,
-                                    "vencimento": str(int(dia_venc_atual)),
-                                    "status": "pendente",
-                                    "data_pagamento": "",
-                                    "chave_pix": pix_atual
-                                }])
-                                conn.update(worksheet="pagamentos", data=pd.concat([df_pag_full, nova_linha], ignore_index=True))
-                                st.cache_data.clear()
-                                st.toast(f"Status de {nome_sel} revertido para pendente.", icon="↩")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Erro ao desfazer: {e}")
-                    # Exibe status atual visivelmente
-                    st.markdown("<div style='margin-top:6px;'></div>", unsafe_allow_html=True)
-                    if not pag_aluno.empty:
-                        data_pag_exib = str(pag_aluno.iloc[-1].get("data_pagamento","")).strip()
-                        if status_atual == "pago" and data_pag_exib and data_pag_exib.lower() not in ("nan",""):
-                            st.markdown(f"<p style='color:#4ade80;font-family:Inter;font-size:12px;text-align:center;margin:0;'>✅ Pago em {data_pag_exib}</p>", unsafe_allow_html=True)
-                        elif status_atual in ("atrasado","pendente"):
-                            try:
-                                venc_exib = proximo_vencimento(int(dia_venc_atual))
-                                dias_exib = (venc_exib - agora_brasilia_naive().date()).days
-                                if dias_exib < 0:
-                                    st.markdown(f"<p style='color:#f87171;font-family:Inter;font-size:12px;text-align:center;margin:0;'>🔴 Atrasado {abs(dias_exib)} dia{'s' if abs(dias_exib)>1 else ''}</p>", unsafe_allow_html=True)
-                                else:
-                                    st.markdown(f"<p style='color:#F9C03D;font-family:Inter;font-size:12px;text-align:center;margin:0;'>⏳ Vence em {dias_exib} dia{'s' if dias_exib!=1 else ''} ({venc_exib.strftime('%d/%m/%Y')})</p>", unsafe_allow_html=True)
-                            except:
-                                pass
-
-                    # Histórico de pagamentos
-                    if not pag_aluno.empty and len(pag_aluno) > 0:
-                        st.markdown("---")
-                        st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📋 Histórico</p>", unsafe_allow_html=True)
-                        st.dataframe(pag_aluno.rename(columns={
-                            "email_aluno":"Email","valor":"Valor","vencimento":"Vencimento",
-                            "status":"Status","data_pagamento":"Pago em","chave_pix":"Chave Pix"
-                        }), column_config={"Email": None}, hide_index=True, use_container_width=True)
-
-                except Exception as e:
-                    st.error(f"Erro pagamentos: {e}")
-
-
-
-
-            elif st.session_state.coach_aba == "relatorio":
-                try:
-                    from reportlab.lib.pagesizes import A4
-                    from reportlab.lib import colors
-                    from reportlab.lib.units import cm
-                    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-                    from reportlab.lib.styles import ParagraphStyle
-                    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-                    import io as _io
-                    import calendar as _cal_rel
-
-                    st.markdown("<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:16px;'>📄 RELATÓRIO MENSAL</p>", unsafe_allow_html=True)
-
-                    # Seleção de mês
-                    hoje_rel = agora_brasilia_naive().date()
-                    meses_opts = []
-                    for i in range(6):
-                        mes_d = (hoje_rel.replace(day=1) - pd.DateOffset(months=i)).date()
-                        meses_opts.append(mes_d)
-                    meses_labels = [f"{_cal_rel.month_name[m.month].capitalize()}/{m.year}" for m in meses_opts]
-                    mes_sel_label = st.selectbox("Mês de referência", meses_labels, key="rel_mes_sel")
-                    mes_sel = meses_opts[meses_labels.index(mes_sel_label)]
-                    mes_inicio = mes_sel.replace(day=1)
-                    mes_fim    = mes_sel.replace(day=_cal_rel.monthrange(mes_sel.year, mes_sel.month)[1])
-
-                    st.markdown(f"<p style='color:#aaa;font-family:Inter;font-size:12px;margin-bottom:16px;'>Gerando relatório de <b style='color:#fff;'>{nome_sel}</b> — {mes_sel_label}</p>", unsafe_allow_html=True)
-
-                    if st.button("📄 Gerar e Baixar PDF", key="btn_gerar_pdf", use_container_width=True):
-                        with st.spinner("Gerando relatório..."):
-
-                            # ── COLETA DE DADOS ──────────────────────────────────
-                            # Registros (cargas)
-                            df_reg = ler_sem_cache("registros")
-                            df_reg["email_aluno"] = df_reg["email_aluno"].astype(str).str.strip().str.lower()
-                            df_reg["data_dt"] = parsear_data(df_reg["data"]).dt.date
-                            df_reg_aluno = df_reg[
-                                (df_reg["email_aluno"] == email_vinculado) &
-                                (df_reg["data_dt"] >= mes_inicio) &
-                                (df_reg["data_dt"] <= mes_fim)
-                            ].copy()
-
-                            # Checkins (peso)
-                            df_ci_rel = ler_sem_cache("checkins")
-                            df_ci_rel["email"] = df_ci_rel["email"].astype(str).str.strip().str.lower()
-                            df_ci_rel["data_dt"] = parsear_data(df_ci_rel["data"]).dt.date
-                            df_ci_aluno = df_ci_rel[
-                                (df_ci_rel["email"] == email_vinculado) &
-                                (df_ci_rel["data_dt"] >= mes_inicio) &
-                                (df_ci_rel["data_dt"] <= mes_fim)
-                            ].copy().sort_values("data_dt")
-
-                            # Frequência (dias únicos com treino)
-                            dias_treino = df_reg_aluno["data_dt"].nunique() if not df_reg_aluno.empty else 0
-                            dias_uteis  = sum(1 for d in range((mes_fim - mes_inicio).days + 1)
-                                              if (mes_inicio + pd.Timedelta(days=d)).weekday() < 5)
-
-                            # Peso início/fim do mês
-                            peso_inicial = float(df_ci_aluno.iloc[0]["peso"])  if not df_ci_aluno.empty else None
-                            peso_final   = float(df_ci_aluno.iloc[-1]["peso"]) if not df_ci_aluno.empty else None
-
-                            # Evolução de cargas agrupada por treino
-                            cargas_por_treino = {}  # {treino: [{exercicio, carga_ini, carga_fim, delta}]}
-                            if not df_reg_aluno.empty and "exercicio" in df_reg_aluno.columns:
-                                df_reg_aluno["carga"] = pd.to_numeric(df_reg_aluno["carga"], errors="coerce")
-                                treino_col = "treino" if "treino" in df_reg_aluno.columns else None
-                                for (treino_nome, ex), grp in df_reg_aluno.groupby(
-                                    [treino_col if treino_col else df_reg_aluno.index.map(lambda x: "Treino"), "exercicio"]
-                                ):
-                                    grp_s = grp.sort_values("data_dt")
-                                    c_ini = grp_s.iloc[0]["carga"]
-                                    c_fim = grp_s.iloc[-1]["carga"]
-                                    if pd.notnull(c_ini) and pd.notnull(c_fim):
-                                        t_key = str(treino_nome) if treino_col else "Treino"
-                                        if t_key not in cargas_por_treino:
-                                            cargas_por_treino[t_key] = []
-                                        cargas_por_treino[t_key].append({
-                                            "exercicio": str(ex),
-                                            "carga_ini": c_ini,
-                                            "carga_fim": c_fim,
-                                            "delta": c_fim - c_ini
-                                        })
-                                # Ordena exercícios dentro de cada treino por maior evolução
-                                for t in cargas_por_treino:
-                                    cargas_por_treino[t].sort(key=lambda x: x["delta"], reverse=True)
-                            cargas_evolucao = [ex for lst in cargas_por_treino.values() for ex in lst]
-
-                            # Feedbacks do mês
-                            feedbacks = []
-                            if not df_ci_aluno.empty:
-                                for _, fb_row in df_ci_aluno.iterrows():
-                                    fb_txt = str(fb_row.get("feedback","")).strip()
-                                    if fb_txt and fb_txt.lower() not in ("nan",""):
-                                        feedbacks.append((fb_row["data_dt"].strftime("%d/%m"), fb_txt))
-
-                            # ── GERAÇÃO DO PDF ───────────────────────────────────
-                            buf_pdf = _io.BytesIO()
-                            doc = SimpleDocTemplate(
-                                buf_pdf, pagesize=A4,
-                                leftMargin=2*cm, rightMargin=2*cm,
-                                topMargin=2*cm, bottomMargin=2*cm
-                            )
-
-                            GOLD   = colors.HexColor("#F9C03D")
-                            DARK   = colors.HexColor("#111111")
-                            GRAY   = colors.HexColor("#888888")
-                            WHITE  = colors.white
-                            GREEN  = colors.HexColor("#4ade80")
-                            RED    = colors.HexColor("#f87171")
-
-                            s_title   = ParagraphStyle("title",   fontName="Helvetica-Bold",   fontSize=22, textColor=GOLD,  spaceAfter=4,  alignment=TA_LEFT)
-                            s_sub     = ParagraphStyle("sub",     fontName="Helvetica",         fontSize=11, textColor=GRAY,  spaceAfter=16, alignment=TA_LEFT)
-                            s_section = ParagraphStyle("section", fontName="Helvetica-Bold",   fontSize=9,  textColor=GOLD,  spaceBefore=14, spaceAfter=6, letterSpacing=2)
-                            s_body    = ParagraphStyle("body",    fontName="Helvetica",         fontSize=10, textColor=WHITE, spaceAfter=4,  leading=15)
-                            s_small   = ParagraphStyle("small",   fontName="Helvetica",         fontSize=8,  textColor=GRAY,  spaceAfter=2)
-                            s_fb      = ParagraphStyle("fb",      fontName="Helvetica-Oblique", fontSize=9,  textColor=GRAY,  spaceAfter=3,  leftIndent=10)
-
-                            story = []
-
-                            # Cabeçalho
-                            s_header_right = ParagraphStyle("hr", fontName="Helvetica", fontSize=9, textColor=GRAY, alignment=TA_RIGHT, leading=14)
-                            cab_table = Table([
-                                [
-                                    Paragraph("JV PERFORMANCE", s_title),
-                                    Paragraph(f"Gerado em {hoje_rel.strftime('%d/%m/%Y')}", s_header_right),
-                                ],
-                                [
-                                    Paragraph(f"Relatório Mensal — {mes_sel_label}", ParagraphStyle("sub2", fontName="Helvetica", fontSize=11, textColor=GRAY)),
-                                    Paragraph("", s_small),
-                                ],
-                                [
-                                    Paragraph(f"Aluno: {nome_sel}", ParagraphStyle("nm", fontName="Helvetica-Bold", fontSize=12, textColor=WHITE)),
-                                    Paragraph("", s_small),
-                                ],
-                            ], colWidths=[13*cm, 4*cm])
-                            cab_table.setStyle(TableStyle([
-                                ("VALIGN", (0,0), (-1,-1), "TOP"),
-                                ("LEFTPADDING", (0,0), (-1,-1), 0),
-                                ("RIGHTPADDING", (0,0), (-1,-1), 0),
-                                ("TOPPADDING", (0,0), (-1,-1), 0),
-                                ("BOTTOMPADDING", (0,0), (-1,-1), 3),
-                            ]))
-                            story.append(cab_table)
-                            story.append(HRFlowable(width="100%", thickness=1, color=GOLD, spaceBefore=6, spaceAfter=14))
-
-                            # ── FREQUÊNCIA
-                            story.append(Paragraph("FREQUÊNCIA", s_section))
-                            freq_pct = int((dias_treino / dias_uteis * 100)) if dias_uteis > 0 else 0
-                            freq_cor = GREEN if freq_pct >= 75 else (GOLD if freq_pct >= 50 else RED)
-                            freq_data = [
-                                [Paragraph("Dias treinados", s_body), Paragraph(f"{dias_treino}", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=freq_cor))],
-                                [Paragraph("Dias úteis no mês", s_body), Paragraph(f"{dias_uteis}", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=WHITE))],
-                                [Paragraph("Aproveitamento", s_body), Paragraph(f"{freq_pct}%", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=freq_cor))],
-                            ]
-                            t_freq = Table(freq_data, colWidths=[10*cm, 6*cm])
-                            t_freq.setStyle(TableStyle([
-                                ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#1a1a1a")),
-                                ("ROWBACKGROUNDS", (0,0), (-1,-1), [colors.HexColor("#1a1a1a"), colors.HexColor("#141414")]),
-                                ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#333")),
-                                ("ROUNDEDCORNERS", [6]),
-                                ("TOPPADDING", (0,0), (-1,-1), 7),
-                                ("BOTTOMPADDING", (0,0), (-1,-1), 7),
-                                ("LEFTPADDING", (0,0), (-1,-1), 12),
-                            ]))
-                            story.append(t_freq)
-
-                            # ── PESO
-                            story.append(Paragraph("EVOLUÇÃO DE PESO", s_section))
-                            if peso_inicial is not None and peso_final is not None:
-                                delta_p = peso_final - peso_inicial
-                                dp_str  = f"{delta_p:+.1f} kg"
-                                dp_cor  = GREEN if delta_p <= 0 else RED
-                                peso_data = [
-                                    [Paragraph("Peso inicial (mês)", s_body), Paragraph(f"{peso_inicial:.1f} kg", ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=WHITE))],
-                                    [Paragraph("Peso final (mês)",   s_body), Paragraph(f"{peso_final:.1f} kg",   ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=WHITE))],
-                                    [Paragraph("Variação",           s_body), Paragraph(dp_str,                   ParagraphStyle("v", fontName="Helvetica-Bold", fontSize=13, textColor=dp_cor))],
-                                ]
-                            else:
-                                peso_data = [[Paragraph("Sem check-ins registrados neste mês.", s_body), Paragraph("", s_body)]]
-                            t_peso = Table(peso_data, colWidths=[10*cm, 6*cm])
-                            t_peso.setStyle(TableStyle([
-                                ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#1a1a1a")),
-                                ("ROWBACKGROUNDS", (0,0), (-1,-1), [colors.HexColor("#1a1a1a"), colors.HexColor("#141414")]),
-                                ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#333")),
-                                ("TOPPADDING", (0,0), (-1,-1), 7),
-                                ("BOTTOMPADDING", (0,0), (-1,-1), 7),
-                                ("LEFTPADDING", (0,0), (-1,-1), 12),
-                            ]))
-                            story.append(t_peso)
-
-                            # ── EVOLUÇÃO DE CARGAS
-                            story.append(Paragraph("EVOLUÇÃO DE CARGAS", s_section))
-                            s_treino_titulo = ParagraphStyle("tt", fontName="Helvetica-Bold", fontSize=9,
-                                textColor=WHITE, spaceBefore=10, spaceAfter=4,
-                                backColor=colors.HexColor("#222222"), leftIndent=0)
-                            s_th = ParagraphStyle("th", fontName="Helvetica-Bold", fontSize=8, textColor=GOLD)
-                            if cargas_por_treino:
-                                for treino_nome, exercicios in cargas_por_treino.items():
-                                    # Subtítulo do treino
-                                    story.append(Paragraph(f"  {treino_nome.upper()}", s_treino_titulo))
-                                    carga_rows = [[
-                                        Paragraph("Exercício", s_th),
-                                        Paragraph("Início",   s_th),
-                                        Paragraph("Fim",      s_th),
-                                        Paragraph("Variação", s_th),
-                                    ]]
-                                    for c in exercicios:
-                                        d = c["delta"]
-                                        d_cor = GREEN if d > 0 else (RED if d < 0 else GRAY)
-                                        carga_rows.append([
-                                            Paragraph(c["exercicio"][:38], s_body),
-                                            Paragraph(f"{c['carga_ini']:.1f} kg", s_body),
-                                            Paragraph(f"{c['carga_fim']:.1f} kg", s_body),
-                                            Paragraph(f"{d:+.1f} kg", ParagraphStyle("dv", fontName="Helvetica-Bold", fontSize=10, textColor=d_cor)),
-                                        ])
-                                    t_carga = Table(carga_rows, colWidths=[8*cm, 3*cm, 3*cm, 3*cm])
-                                    t_carga.setStyle(TableStyle([
-                                        ("BACKGROUND",    (0,0), (-1,0),  colors.HexColor("#111111")),
-                                        ("ROWBACKGROUNDS",(0,1), (-1,-1), [colors.HexColor("#1a1a1a"), colors.HexColor("#141414")]),
-                                        ("GRID",          (0,0), (-1,-1), 0.3, colors.HexColor("#333")),
-                                        ("TOPPADDING",    (0,0), (-1,-1), 6),
-                                        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-                                        ("LEFTPADDING",   (0,0), (-1,-1), 8),
-                                    ]))
-                                    story.append(t_carga)
-                            else:
-                                story.append(Paragraph("Nenhum treino registrado neste mês.", s_body))
-
-                            # ── FEEDBACKS
-                            if feedbacks:
-                                story.append(Paragraph("RELATOS DO ALUNO", s_section))
-                                for dt_fb, txt_fb in feedbacks[-5:]:
-                                    story.append(Paragraph(f"<b>{dt_fb}</b> — {txt_fb[:200]}", s_fb))
-
-                            # ── RODAPÉ
-                            story.append(Spacer(1, 0.5*cm))
-                            story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#333"), spaceAfter=6))
-                            story.append(Paragraph(f"JV Performance  •  {mes_sel_label}  •  {nome_sel}", ParagraphStyle("footer", fontName="Helvetica", fontSize=7, textColor=GRAY, alignment=TA_CENTER)))
-
-                            doc.build(story)
-                            buf_pdf.seek(0)
-
-                            nome_arquivo = f"relatorio_{nome_sel.replace(' ','_')}_{mes_sel.strftime('%m_%Y')}.pdf"
-                            st.download_button(
-                                label="⬇️ Baixar Relatório PDF",
-                                data=buf_pdf,
-                                file_name=nome_arquivo,
-                                mime="application/pdf",
-                                use_container_width=True
-                            )
-                            st.success(f"Relatório gerado com sucesso!")
-
-                except Exception as e:
-                    st.error(f"Erro ao gerar relatório: {e}")
-                    import traceback
-                    st.code(traceback.format_exc())
+                    st.info("Aba de check-ins estÃ¡ vazia.")
+            except Exception as e:
+                st.error(f"Erro check-ins: {e}")
 
     # ==========================================================
-    # ÁREA DO ATLETA
+    # ÃREA DO ATLETA
     # ==========================================================
     else:
-        # Carrega histórico uma vez para toda a área do atleta
+        # Carrega histÃ³rico uma vez para toda a Ã¡rea do atleta
         try:
             historico_geral = ler_planilha("registros")
             historico_geral['email_aluno'] = historico_geral['email_aluno'].astype(str).str.strip().str.lower()
-            historico_geral['data'] = parsear_data(historico_geral['data'])
         except:
             historico_geral = pd.DataFrame()
 
-        # ---- LEMBRETE DE CHECK-IN SEMANAL ----
-        try:
-            df_ci_lembrete = ler_planilha("checkins")
-            df_ci_lembrete['email'] = df_ci_lembrete['email'].astype(str).str.strip().str.lower()
-            meus_ci = df_ci_lembrete[df_ci_lembrete['email'] == st.session_state.email]
-            mostrar_lembrete = True
-            if not meus_ci.empty:
-                ultima_data_ci = parsear_data(meus_ci['data']).max()
-                if pd.notnull(ultima_data_ci):
-                    dias_sem_ci = (agora_brasilia_naive().date() - ultima_data_ci.date()).days
-                    mostrar_lembrete = dias_sem_ci > 7
-            if mostrar_lembrete:
-                st.markdown("""
-                    <div style='background:rgba(249,192,61,0.07);border:1px solid rgba(249,192,61,0.25);
-                    border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;
-                    align-items:center;gap:12px;'>
-                        <span style='font-size:1.4rem;'>📋</span>
-                        <div>
-                            <p style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;
-                            letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Check-in Semanal</p>
-                            <p style='color:#888;font-family:Inter;font-size:12px;margin:0;'>
-                            Seu coach precisa do seu feedback semanal. Acesse a aba <b style='color:#F9C03D;'>Check-in</b> e envie!</p>
-                        </div>
-                    </div>
-                """, unsafe_allow_html=True)
-        except:
-            pass
+        # ---- ACESSO RÃPIDO MOBILE ----
+        st.markdown(f"""
+            <div class='mobile-account-panel'>
+                <div class='mobile-account-label'>Conta do atleta</div>
+                <div class='mobile-account-email'>{html.escape(st.session_state.email)}</div>
+            </div>
+        """, unsafe_allow_html=True)
 
-        # ---- STATUS DE PAGAMENTO + BLOQUEIO ----
-        try:
-            df_pag_ath = ler_planilha("pagamentos")
-            if not df_pag_ath.empty and "email_aluno" in df_pag_ath.columns:
-                df_pag_ath["email_aluno"] = df_pag_ath["email_aluno"].astype(str).str.strip().str.lower()
-                meu_pag = df_pag_ath[df_pag_ath["email_aluno"] == st.session_state.email]
-                if not meu_pag.empty:
-                    row_pag = meu_pag.iloc[-1]
-                    venc_str_ath = str(row_pag.get("vencimento","")).strip()
-                    status_ath   = str(row_pag.get("status","")).strip().lower()
-                    valor_ath    = str(row_pag.get("valor","")).strip()
-                    pix_ath      = limpar_pix(row_pag.get("chave_pix",""))
-                    hoje_ath     = agora_brasilia_naive().date()
-
-                    # Parse do vencimento
-                    venc_ath = None
-                    try:
-                        _v = str(venc_str_ath).replace(",",".")
+        with st.expander("âš™ï¸ Conta e check-in"):
+            tab_checkin, tab_senha, tab_sair = st.tabs(["Check-in", "Senha", "Sair"])
+            with tab_checkin:
+                with st.form("form_checkin_mobile", clear_on_submit=True):
+                    st.markdown("##### RelatÃ³rio de EvoluÃ§Ã£o")
+                    peso_atual_mobile = st.number_input("Peso Atual (kg)", min_value=30.0, step=0.1, key="peso_mobile")
+                    feedback_mobile = st.text_area("Como se sentiu (Fome, Sono, Treino)?", key="feedback_mobile")
+                    if st.form_submit_button("ENVIAR PARA O COACH", use_container_width=True):
                         try:
-                            dia_v_ath = int(float(_v))
-                        except:
-                            dia_v_ath = 0
-                        if 1 <= dia_v_ath <= 28:
-                            venc_ath = proximo_vencimento(dia_v_ath)
-                        elif _v and _v.lower() not in ("nan",""):
-                            dt_p = parsear_data(pd.Series([_v])).iloc[0]
-                            if pd.notnull(dt_p):
-                                venc_ath = dt_p.date()
-                    except Exception as e_parse:
-                        pass
-                    if venc_ath is not None:
-                        import calendar as _cal
-                        hoje_ath = agora_brasilia_naive().date()
-                        pix_info_red = f"<p style='color:#f87171;font-family:Inter;font-size:12px;margin:6px 0 0;'>Chave Pix: <b>{pix_ath}</b></p>" if pix_ath and pix_ath.lower() != "nan" else ""
-                        pix_info_yel = f"<p style='color:#F9C03D;font-family:Inter;font-size:12px;margin:6px 0 0;'>Chave Pix: <b>{pix_ath}</b></p>" if pix_ath and pix_ath.lower() != "nan" else ""
-
-                        if status_ath == "pago":
-                            # Mostra próximo vencimento
-                            prox_venc = proximo_vencimento_futuro(int(float(str(venc_str_ath).replace(",",".")))) if venc_ath is not None else venc_ath
-                            dias_prox = (prox_venc - hoje_ath).days
-                            if dias_prox <= 5:
-                                st.markdown(f"""
-                                    <div style='background:rgba(249,192,61,0.07);border:1px solid rgba(249,192,61,0.25);
-                                    border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>
-                                        <span style='font-size:1.4rem;'>💰</span>
-                                        <div>
-                                            <p style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;
-                                            letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Próximo Pagamento</p>
-                                            <p style='color:#aaa;font-family:Inter;font-size:12px;margin:0;'>
-                                            Vence em {dias_prox} dia{'s' if dias_prox!=1 else ''} ({prox_venc.strftime('%d/%m/%Y')}) — R$ {valor_ath}</p>
-                                            {pix_info_yel}
-                                        </div>
-                                    </div>
-                                """, unsafe_allow_html=True)
-                            else:
-                                st.markdown(f"""
-                                    <div style='background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);
-                                    border-radius:14px;padding:12px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>
-                                        <span style='font-size:1.2rem;'>✅</span>
-                                        <div>
-                                            <p style='color:#4ade80;font-family:Inter;font-size:9px;font-weight:700;
-                                            letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento em Dia</p>
-                                            <p style='color:#aaa;font-family:Inter;font-size:12px;margin:0;'>
-                                            Próximo vencimento: {prox_venc.strftime('%d/%m/%Y')} — R$ {valor_ath}</p>
-                                        </div>
-                                    </div>
-                                """, unsafe_allow_html=True)
-
-                        else:
-                            # Pendente/atrasado — calcula em relação ao vencimento deste mês
                             try:
-                                dia_n = int(float(str(venc_str_ath).replace(",",".")))
+                                df_ci = ler_sem_cache("checkins")
                             except:
-                                dia_n = 0
-                            if dia_n:
-                                ult_dia_mes = _cal.monthrange(hoje_ath.year, hoje_ath.month)[1]
-                                venc_ref = hoje_ath.replace(day=min(dia_n, ult_dia_mes))
+                                df_ci = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
+                            novo = pd.DataFrame([{"data": datetime.now().strftime("%d/%m/%Y"),
+                                                  "email": st.session_state.email,
+                                                  "peso": peso_atual_mobile, "feedback": feedback_mobile}])
+                            conn.update(worksheet="checkins", data=pd.concat([df_ci, novo], ignore_index=True))
+                            st.success("Check-in enviado! ðŸš€")
+                        except Exception as e:
+                            st.error(f"Erro: {e}")
+            with tab_senha:
+                nova_senha_mobile = st.text_input("Nova Senha", type="password", key="new_pass_mobile")
+                confirma_senha_mobile = st.text_input("Confirme", type="password", key="conf_pass_mobile")
+                if st.button("ATUALIZAR SENHA", key="btn_senha_mobile", use_container_width=True):
+                    if nova_senha_mobile == confirma_senha_mobile and len(nova_senha_mobile) >= 4:
+                        try:
+                            df_u = ler_sem_cache("usuarios")
+                            mask = df_u['email'].astype(str).str.strip().str.lower() == st.session_state.email.lower()
+                            if mask.any():
+                                df_u.loc[mask, 'senha'] = str(nova_senha_mobile).strip()
+                                conn.update(worksheet="usuarios", data=df_u)
+                                st.success("Senha alterada!")
+                                time.sleep(1)
+                                st.rerun()
                             else:
-                                venc_ref = venc_ath
-                            dias_ath = (venc_ref - hoje_ath).days
-
-                            if dias_ath <= -3:
-                                dias_atraso = abs(dias_ath)
-                                st.markdown(f"""
-                                    <div style='background:rgba(248,113,113,0.10);border:1.5px solid rgba(248,113,113,0.5);
-                                    border-radius:18px;padding:28px 22px;margin-bottom:20px;text-align:center;'>
-                                        <p style='font-size:2.5rem;margin:0 0 10px;'>🔒</p>
-                                        <p style='color:#f87171;font-family:Space Grotesk,sans-serif;font-size:1.2rem;
-                                        font-weight:900;letter-spacing:-0.5px;text-transform:uppercase;margin:0 0 8px;'>
-                                        Acesso Bloqueado</p>
-                                        <p style='color:#f87171;font-family:Inter;font-size:13px;margin:0 0 6px;'>
-                                        Pagamento em atraso há <b>{dias_atraso} dia{'s' if dias_atraso>1 else ''}</b> — R$ {valor_ath}</p>
-                                        <p style='color:#aaa;font-family:Inter;font-size:11px;margin:0 0 16px;'>
-                                        Regularize seu pagamento para continuar acessando o app.</p>
-                                    </div>
-                                """, unsafe_allow_html=True)
-                                # Chave Pix com botão copiar nativo
-                                if pix_ath and pix_ath.lower() not in ("nan", ""):
-                                    st.markdown(f"""
-                                        <div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);
-                                        border-radius:14px;padding:16px 18px;text-align:center;margin-bottom:12px;'>
-                                            <p style='color:#f87171;font-family:Inter;font-size:9px;font-weight:700;
-                                            letter-spacing:2px;text-transform:uppercase;margin:0 0 6px;'>Pagar via Pix</p>
-                                            <p style='color:#aaa;font-family:Inter;font-size:11px;margin:0 0 10px;'>
-                                            Valor: <b style='color:#fff;'>R$ {valor_ath}</b></p>
-                                            <p style='color:#aaa;font-family:Inter;font-size:10px;margin:0;'>
-                                            Copie a chave abaixo 👇</p>
-                                        </div>
-                                    """, unsafe_allow_html=True)
-                                    st.code(pix_ath, language=None)
-                                st.stop()
-
-                            elif dias_ath < 0:
-                                dias_atraso = abs(dias_ath)
-                                st.markdown(f"""
-                                    <div style='background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);
-                                    border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>
-                                        <span style='font-size:1.4rem;'>🔴</span>
-                                        <div>
-                                            <p style='color:#f87171;font-family:Inter;font-size:9px;font-weight:700;
-                                            letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento Atrasado</p>
-                                            <p style='color:#f87171;font-family:Inter;font-size:12px;margin:0;'>
-                                            Venceu há {dias_atraso} dia{'s' if dias_atraso>1 else ''} — R$ {valor_ath}. O acesso será bloqueado em breve.</p>
-                                            {pix_info_red}
-                                        </div>
-                                    </div>
-                                """, unsafe_allow_html=True)
-
-                            elif dias_ath <= 5:
-                                st.markdown(f"""
-                                    <div style='background:rgba(249,192,61,0.07);border:1px solid rgba(249,192,61,0.25);
-                                    border-radius:14px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;'>
-                                        <span style='font-size:1.4rem;'>💰</span>
-                                        <div>
-                                            <p style='color:#F9C03D;font-family:Inter;font-size:9px;font-weight:700;
-                                            letter-spacing:2px;text-transform:uppercase;margin:0 0 3px;'>Pagamento Próximo</p>
-                                            <p style='color:#aaa;font-family:Inter;font-size:12px;margin:0;'>
-                                            Vence em {dias_ath} dia{'s' if dias_ath!=1 else ''} ({venc_ref.strftime('%d/%m/%Y')}) — R$ {valor_ath}</p>
-                                            {pix_info_yel}
-                                        </div>
-                                    </div>
-                                """, unsafe_allow_html=True)
-        except Exception as e_pag:
-            pass  # pagamentos não cadastrados — silencioso
+                                st.error("UsuÃ¡rio nÃ£o encontrado.")
+                        except Exception as e:
+                            st.error(f"Erro: {e}")
+                    elif len(nova_senha_mobile) < 4:
+                        st.warning("MÃ­nimo 4 caracteres.")
+                    else:
+                        st.error("As senhas nÃ£o coincidem.")
+            with tab_sair:
+                st.caption("Encerra sua sessÃ£o neste aparelho.")
+                if st.button("â†© Sair", key="btn_sair_mobile", use_container_width=True):
+                    try:
+                        todos_cookies = cookie_manager.get_all()
+                        if "jv_ferreira_login" in todos_cookies:
+                            cookie_manager.delete("jv_ferreira_login")
+                    except:
+                        pass
+                    for k, v in defaults.items():
+                        st.session_state[k] = v
+                    st.session_state.saindo = True
+                    time.sleep(0.3)
+                    st.rerun()
 
         # ---- STREAK ----
         streak = calcular_streak(historico_geral, st.session_state.email)
@@ -1974,10 +789,10 @@ else:
             linha_u = df_u[df_u['email'] == st.session_state.email]
             if not linha_u.empty and 'mensagem_coach' in df_u.columns:
                 msg = str(linha_u.iloc[0].get('mensagem_coach', '')).strip()
+                msg_html = html.escape(msg).replace(chr(13) + chr(10), '<br>').replace(chr(10), '<br>')
                 if msg and msg.lower() not in ('nan', ''):
-                    # Chave estável baseada no conteúdo (hash() muda por execução)
-                    import hashlib
-                    msg_key = "msg_lida_" + hashlib.md5(msg.encode()).hexdigest()
+                    # Chave Ãºnica por conteÃºdo da mensagem â€” nova msg = novo alerta
+                    msg_key = f"msg_lida_{hash(msg)}"
                     if msg_key not in st.session_state:
                         st.session_state[msg_key] = False
 
@@ -1985,201 +800,216 @@ else:
                         st.markdown(f"""
                             <div class='coach-alert'>
                                 <div class='coach-alert-header'>
-                                    <span class='coach-alert-label'>📣 Mensagem do Coach</span>
+                                    <span class='coach-alert-label'>ðŸ“£ Mensagem do Coach</span>
                                     <span class='coach-alert-dot'></span>
                                 </div>
-                                <div class='coach-alert-texto'>{msg}</div>
+                                <div class='coach-alert-texto'>{msg_html}</div>
                             </div>
                         """, unsafe_allow_html=True)
                         col_ok, _ = st.columns([1, 3])
                         with col_ok:
-                            def _dispensar_msg(_key=msg_key):
-                                st.session_state[_key] = True
-                            st.button("✓ Entendido", key="dismiss_msg",
-                                      use_container_width=True, on_click=_dispensar_msg)
+                            if st.button("âœ“ Entendido", key="dismiss_msg", use_container_width=True):
+                                st.session_state[msg_key] = True
+                                st.rerun()
+                    else:
+                        # VersÃ£o compacta apÃ³s leitura
+                        st.markdown(f"""
+                            <div class='coach-msg'>
+                                <div class='coach-msg-label'>ðŸ“£ Coach</div>
+                                <div class='coach-msg-texto'>{msg_html}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
         except:
             pass
 
-        # ---- ABAS: TREINO | CHECK-IN | DIETA ----
-        col_t, col_c, col_d = st.columns(3)
+        # ---- ABAS: TREINO | MINHA EVOLUÃ‡ÃƒO ----
+        col_t, col_e = st.columns(2)
         with col_t:
             is_treino = st.session_state.aba_ativa == 'treino'
             st.markdown(f'<div class="{"btn-primary" if is_treino else ""}">', unsafe_allow_html=True)
-            if st.button("🏋️ Treino", key="tab_treino", use_container_width=True):
+            if st.button("ðŸ‹ï¸ Treino", key="tab_treino", use_container_width=True):
                 st.session_state.aba_ativa = 'treino'
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
-        with col_c:
-            is_checkin = st.session_state.aba_ativa == 'checkin'
-            st.markdown(f'<div class="{"btn-primary" if is_checkin else ""}">', unsafe_allow_html=True)
-            if st.button("📋 Check-in", key="tab_checkin", use_container_width=True):
-                st.session_state.aba_ativa = 'checkin'
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-        with col_d:
-            is_dieta = st.session_state.aba_ativa == 'dieta'
-            st.markdown(f'<div class="{"btn-primary" if is_dieta else ""}">', unsafe_allow_html=True)
-            if st.button("🥗 Dieta", key="tab_dieta", use_container_width=True):
-                st.session_state.aba_ativa = 'dieta'
+        with col_e:
+            is_evolucao = st.session_state.aba_ativa == 'evolucao'
+            st.markdown(f'<div class="{"btn-primary" if is_evolucao else ""}">', unsafe_allow_html=True)
+            if st.button("ðŸ“ˆ Minha EvoluÃ§Ã£o", key="tab_evolucao", use_container_width=True):
+                st.session_state.aba_ativa = 'evolucao'
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown("---")
 
         # ==========================================================
-        # ABA: CHECK-IN
+        # ABA: MINHA EVOLUÃ‡ÃƒO
         # ==========================================================
-        if st.session_state.aba_ativa == 'checkin':
+        if st.session_state.aba_ativa == 'evolucao':
             st.markdown(
                 "<h2 style='font-family:Space Grotesk;font-size:1.8rem;font-weight:900;line-height:1;margin-bottom:16px;'>"
-                "CHECK-IN <span style='color:#F9C03D;'>SEMANAL</span></h2>",
+                "MINHA <span style='color:#F9C03D;'>EVOLUÃ‡ÃƒO</span></h2>",
                 unsafe_allow_html=True
             )
-            if st.session_state.get("checkin_enviado"):
-                ci_data = st.session_state.get("checkin_dados", {})
+
+            meu_hist = historico_geral[historico_geral['email_aluno'] == st.session_state.email].copy() \
+                if not historico_geral.empty else pd.DataFrame()
+
+            if meu_hist.empty:
+                st.info("Nenhum treino registrado ainda. Complete seu primeiro treino para ver sua evoluÃ§Ã£o aqui.")
+            else:
+                meu_hist['data'] = pd.to_datetime(meu_hist['data'], dayfirst=True)
+
+                # Recordes Pessoais
                 st.markdown(
-                    f"<div style='background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);"
-                    f"border-radius:14px;padding:18px 20px;'>"
-                    f"<p style='color:#4ade80;font-family:Inter;font-size:9px;letter-spacing:2px;"
-                    f"text-transform:uppercase;font-weight:700;margin-bottom:8px;'>✅ Check-in Recebido</p>"
-                    f"<p style='color:#aaa;font-family:Inter;font-size:13px;margin:4px 0;'>"
-                    f"📅 {ci_data.get('data','')}</p>"
-                    f"<p style='color:#aaa;font-family:Inter;font-size:13px;margin:4px 0;'>"
-                    f"⚖️ {ci_data.get('peso','')} kg</p>"
-                    f"<p style='color:#555;font-family:Inter;font-size:12px;margin-top:8px;'>"
-                    f"Seu coach foi notificado!</p></div>",
+                    "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>ðŸ† Recordes Pessoais</p>",
                     unsafe_allow_html=True
                 )
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("Novo Check-in", key="novo_checkin_aba", use_container_width=True):
-                    st.session_state.checkin_enviado = False
-                    st.rerun()
-            else:
-                with st.form("form_checkin_aba", clear_on_submit=True):
-                    st.markdown("##### Relatório de Evolução")
-                    peso_atual_aba = st.number_input("Peso Atual (kg)", min_value=30.0, step=0.1, key="peso_checkin_aba")
-                    feedback_aba = st.text_area("Como se sentiu (Fome, Sono, Treino)?", key="feedback_checkin_aba")
-                    if st.form_submit_button("ENVIAR PARA O COACH", use_container_width=True):
-                        try:
-                            try:
-                                df_ci_aba = ler_sem_cache("checkins")
-                            except:
-                                df_ci_aba = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
-                            data_envio_aba = agora_brasilia_naive().strftime("%d/%m/%Y")
-                            novo_aba = pd.DataFrame([{"data": data_envio_aba,
-                                                      "email": st.session_state.email,
-                                                      "peso": peso_atual_aba,
-                                                      "feedback": feedback_aba}])
-                            conn.update(worksheet="checkins", data=pd.concat([df_ci_aba, novo_aba], ignore_index=True))
-                            st.session_state.checkin_enviado = True
-                            st.session_state.checkin_dados = {"data": data_envio_aba, "peso": peso_atual_aba}
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Erro: {e}")
+                prs = meu_hist.groupby('exercicio').agg(
+                    carga_max=('carga', 'max'),
+                    ultima_data=('data', 'max')
+                ).reset_index().sort_values('carga_max', ascending=False)
 
-        # ==========================================================
-        # ABA: DIETA
-        # ==========================================================
-        elif st.session_state.aba_ativa == 'dieta':
-            st.markdown(
-                "<h2 style='font-family:Space Grotesk;font-size:1.8rem;font-weight:900;line-height:1;margin-bottom:16px;'>"
-                "MINHA <span style='color:#F9C03D;'>DIETA</span></h2>",
-                unsafe_allow_html=True
-            )
-            try:
-                df_dieta_ath = pd.DataFrame()
-                for _t in range(3):
-                    try:
-                        df_dieta_ath = ler_sem_cache("dietas")
-                        if not df_dieta_ath.empty:
-                            break
-                    except:
-                        pass
-                    time.sleep(1)
-                if df_dieta_ath.empty or "email_aluno" not in df_dieta_ath.columns:
-                    df_dieta_ath = pd.DataFrame(columns=["email_aluno","refeicao","descricao","calorias"])
-                df_dieta_ath["email_aluno"] = df_dieta_ath["email_aluno"].astype(str).str.strip().str.lower()
-                minha_dieta = df_dieta_ath[df_dieta_ath["email_aluno"] == st.session_state.email]
-                if minha_dieta.empty:
+                pr_html = "<div style='background:rgba(28,27,27,0.9);border-radius:14px;overflow:hidden;margin-bottom:20px;'>"
+                for _, r in prs.iterrows():
+                    pr_html += f"""
+                        <div class='pr-row'>
+                            <div>
+                                <div class='pr-nome'>{r['exercicio']}</div>
+                                <div class='pr-data'>{r['ultima_data'].strftime('%d/%m/%Y')}</div>
+                            </div>
+                            <div class='pr-carga'>{r['carga_max']:.1f} kg</div>
+                        </div>"""
+                pr_html += "</div>"
+                st.markdown(pr_html, unsafe_allow_html=True)
+
+                # CalendÃ¡rio de treinos
+                st.markdown(
+                    "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>ðŸ“… CalendÃ¡rio de Treinos</p>",
+                    unsafe_allow_html=True
+                )
+
+                # NavegaÃ§Ã£o de mÃªs
+                if 'cal_mes' not in st.session_state:
+                    st.session_state.cal_mes = datetime.now().replace(day=1)
+
+                col_prev, col_mes_label, col_next = st.columns([1, 3, 1])
+                with col_prev:
+                    if st.button("â†", key="cal_prev", use_container_width=True):
+                        primeiro = st.session_state.cal_mes
+                        st.session_state.cal_mes = (primeiro - timedelta(days=1)).replace(day=1)
+                        st.rerun()
+                with col_mes_label:
                     st.markdown(
-                        "<div style='background:rgba(28,27,27,0.9);border-radius:16px;padding:32px 24px;"
-                        "text-align:center;border:1px solid rgba(255,255,255,0.05);'>"
-                        "<p style='font-size:2rem;'>🥗</p>"
-                        "<p style='color:#555;font-family:Inter;font-size:13px;'>Sua dieta ainda não foi cadastrada.<br>Entre em contato com seu coach!</p>"
-                        "</div>",
+                        f"<p style='text-align:center;color:#ccc;font-family:Inter;font-size:13px;font-weight:600;letter-spacing:1px;margin:10px 0;'>"
+                        f"{st.session_state.cal_mes.strftime('%B %Y').upper()}</p>",
                         unsafe_allow_html=True
                     )
-                else:
-                    total_cal = 0
-                    for _, linha in minha_dieta.iterrows():
-                        ref     = str(linha.get('refeicao','')).strip()
-                        desc    = str(linha.get('descricao','')).strip()
-                        cal_val = str(linha.get('calorias','')).strip() if 'calorias' in minha_dieta.columns else ''
-                        if not ref or ref.lower() == 'nan':
-                            continue
-                        if not desc or desc.lower() == 'nan':
-                            continue
-                        cal_badge = ''
-                        if cal_val and cal_val.lower() not in ('nan',''):
-                            cal_badge = f"<span style='color:#F9C03D;font-family:Space Grotesk;font-weight:700;font-size:0.9rem;'>{cal_val} kcal</span>"
-                            try:
-                                total_cal += int(cal_val)
-                            except:
-                                pass
-                        st.markdown(
-                            f"<div style='background:rgba(22,21,21,0.95);border-radius:16px;"
-                            f"padding:18px 20px;margin-bottom:10px;"
-                            f"border:1px solid rgba(255,255,255,0.05);'>"
-                            f"<div style='display:flex;justify-content:space-between;"
-                            f"align-items:center;margin-bottom:10px;'>"
-                            f"<span style='color:#F9C03D;font-family:Inter;font-size:9px;"
-                            f"font-weight:700;letter-spacing:2px;text-transform:uppercase;'>"
-                            f"🍽️ {ref}</span>{cal_badge}</div>"
-                            f"<p style='color:#bbb;font-family:Inter;font-size:13px;"
-                            f"line-height:1.6;margin:0;white-space:pre-line;'>{desc}</p></div>",
-                            unsafe_allow_html=True
-                        )
-                    if total_cal > 0:
-                        st.markdown(
-                            f"<div style='background:rgba(249,192,61,0.08);"
-                            f"border:1px solid rgba(249,192,61,0.2);border-radius:14px;"
-                            f"padding:14px 20px;display:flex;justify-content:space-between;"
-                            f"align-items:center;margin-top:8px;'>"
-                            f"<span style='color:#888;font-family:Inter;font-size:11px;"
-                            f"letter-spacing:1px;text-transform:uppercase;'>Total Estimado</span>"
-                            f"<span style='color:#F9C03D;font-family:Space Grotesk;"
-                            f"font-weight:900;font-size:1.3rem;'>{total_cal} kcal</span></div>",
-                            unsafe_allow_html=True
-                        )
-            except Exception as e:
-                st.error(f'Erro ao carregar dieta: {e}')
+                with col_next:
+                    hoje_dt = datetime.now().replace(day=1)
+                    if st.session_state.cal_mes < hoje_dt:
+                        if st.button("â†’", key="cal_next", use_container_width=True):
+                            ultimo_dia = (st.session_state.cal_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
+                            st.session_state.cal_mes = ultimo_dia
+                            st.rerun()
 
-        # ABA: MINHA EVOLUÇÃO
-        # ==========================================================
+                # Monta dados do mÃªs
+                mes_ref = st.session_state.cal_mes
+                ano, mes = mes_ref.year, mes_ref.month
+                primeiro_dia_semana = mes_ref.weekday()  # 0=segunda
+                import calendar as cal_lib
+                total_dias = cal_lib.monthrange(ano, mes)[1]
+
+                # Volume por dia no mÃªs
+                meu_hist['data_date'] = meu_hist['data'].dt.date
+                vol_por_dia = {}
+                for _, row_h in meu_hist.iterrows():
+                    d = row_h['data_date']
+                    if d.year == ano and d.month == mes:
+                        vol = float(row_h.get('carga', 0))
+                        vol_por_dia[d.day] = vol_por_dia.get(d.day, 0) + vol
+
+                max_vol = max(vol_por_dia.values()) if vol_por_dia else 1
+
+                # HTML do calendÃ¡rio
+                dias_semana = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM']
+                cal_html = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;padding:16px;margin-bottom:20px;border:1px solid rgba(255,255,255,0.05);'>"
+                # Header dias da semana
+                cal_html += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:8px;'>"
+                for d in dias_semana:
+                    cal_html += f"<div style='text-align:center;color:#333;font-family:Inter;font-size:9px;letter-spacing:1px;font-weight:600;'>{d}</div>"
+                cal_html += "</div>"
+                # Grid de dias
+                cal_html += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;'>"
+                # CÃ©lulas vazias antes do dia 1
+                for _ in range(primeiro_dia_semana):
+                    cal_html += "<div></div>"
+                hoje_date = datetime.now().date()
+                for dia in range(1, total_dias + 1):
+                    data_dia = datetime(ano, mes, dia).date()
+                    vol = vol_por_dia.get(dia, 0)
+                    is_hoje = data_dia == hoje_date
+                    if vol > 0:
+                        intensidade = vol / max_vol
+                        opacity = 0.3 + 0.7 * intensidade
+                        bg = f"rgba(249,192,61,{opacity:.2f})"
+                        cor_txt = "#0A0A0A" if intensidade > 0.5 else "#F9C03D"
+                        borda = "1px solid rgba(249,192,61,0.5)"
+                    else:
+                        bg = "rgba(255,255,255,0.03)"
+                        cor_txt = "#333"
+                        borda = "1px solid rgba(255,255,255,0.04)"
+                    anel = "box-shadow:0 0 0 2px #F9C03D;" if is_hoje else ""
+                    cal_html += (
+                        f"<div style='aspect-ratio:1;display:flex;align-items:center;justify-content:center;"
+                        f"border-radius:8px;background:{bg};border:{borda};{anel}"
+                        f"font-family:Space Grotesk;font-size:11px;font-weight:700;color:{cor_txt};'>{dia}</div>"
+                    )
+                cal_html += "</div>"
+                # Legenda
+                cal_html += """
+                    <div style='display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.04);'>
+                        <div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,0.3);'></div>
+                        <span style='color:#444;font-family:Inter;font-size:9px;letter-spacing:1px;'>Volume baixo</span>
+                        <div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,1);margin-left:8px;'></div>
+                        <span style='color:#444;font-family:Inter;font-size:9px;letter-spacing:1px;'>Volume alto</span>
+                    </div>
+                """
+                cal_html += "</div>"
+                st.markdown(cal_html, unsafe_allow_html=True)
+
+                # GrÃ¡fico de progressÃ£o
+                st.markdown(
+                    "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>ðŸ“Š ProgressÃ£o de Carga</p>",
+                    unsafe_allow_html=True
+                )
+                ex_sel = st.selectbox("Selecione o exercÃ­cio:", meu_hist['exercicio'].unique().tolist(), key="ev_ex")
+                df_prog = meu_hist[meu_hist['exercicio'] == ex_sel].sort_values('data')
+                df_prog['data_display'] = df_prog['data'].dt.strftime('%d/%m/%Y')
+                fig = px.line(df_prog, x='data_display', y='carga', markers=True)
+                fig.update_traces(line_color='#F9C03D', marker=dict(color='#F9C03D', size=8))
+                fig.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    font_color="white", margin=dict(l=0, r=0, t=10, b=0),
+                    xaxis_title="", yaxis_title="kg", height=300
+                )
+                fig.update_xaxes(type='category', gridcolor='rgba(255,255,255,0.05)', nticks=5, tickangle=0)
+                fig.update_yaxes(gridcolor='rgba(255,255,255,0.05)')
+                st.plotly_chart(fig, use_container_width=True)
+
         # ==========================================================
         # ABA: TREINO
         # ==========================================================
         else:
             st.markdown(
                 "<h2 style='font-family:Space Grotesk;font-size:2rem;font-weight:900;line-height:1;margin-bottom:4px;'>"
-                "PROTOCOLO <span style='color:#F9C03D;'>DIÁRIO</span></h2>",
+                "PROTOCOLO <span style='color:#F9C03D;'>DIÃRIO</span></h2>",
                 unsafe_allow_html=True
             )
 
             try:
                 df_treinos = ler_planilha("planilha_treinos")
-                # Proteção contra retorno vazio ou sem colunas esperadas
-                if df_treinos.empty or 'email_aluno' not in df_treinos.columns:
-                    st.info("Carregando protocolo... Aguarde um instante.")
-                    st.stop()
                 df_treinos['email_aluno'] = df_treinos['email_aluno'].astype(str).str.strip().str.lower()
-                if 'status' not in df_treinos.columns:
-                    df_treinos['status'] = 'ativo'
-                df_treinos['status'] = df_treinos['status'].fillna('ativo')
-                meus_treinos = df_treinos[
-                    (df_treinos['email_aluno'] == st.session_state.email) &
-                    (df_treinos['status'] == 'ativo')
-                ]
+                meus_treinos = df_treinos[df_treinos['email_aluno'] == st.session_state.email]
 
                 if meus_treinos.empty:
                     st.info("Nenhum protocolo ativo. Aguarde seu coach configurar seu treino.")
@@ -2191,46 +1021,27 @@ else:
                         st.session_state.treino_ativo = selecao_treino
                         st.session_state.ex_index = 0
                         st.session_state.cargas_sessao = {}
-                        st.session_state.cargas_anteriores = {}
                         st.session_state.treino_finalizado = False
                         st.session_state.notas_sessao = ""
 
                     exercicios_df = meus_treinos[meus_treinos['treino_nome'] == selecao_treino].reset_index(drop=True)
                     total_ex = len(exercicios_df)
 
-                    # Pré-carrega cargas e guarda anterior imutável
-                    if 'cargas_anteriores' not in st.session_state:
-                        st.session_state.cargas_anteriores = {}
-
+                    # PrÃ©-carrega cargas
                     for idx, row in exercicios_df.iterrows():
                         chave = f"carga_{idx}"
-                        chave_ant = f"ant_{idx}"
-                        carga_hist = 0.0
-                        if not historico_geral.empty:
-                            filtro = historico_geral[
-                                (historico_geral['email_aluno'] == st.session_state.email) &
-                                (historico_geral['exercicio'] == row['exercicio'])
-                            ]
-                            if not filtro.empty:
-                                carga_hist = float(filtro.iloc[-1]['carga'])
                         if chave not in st.session_state.cargas_sessao:
-                            st.session_state.cargas_sessao[chave] = carga_hist
-                        if chave_ant not in st.session_state.cargas_anteriores:
-                            st.session_state.cargas_anteriores[chave_ant] = carga_hist
+                            carga_ant = 0.0
+                            if not historico_geral.empty:
+                                filtro = historico_geral[
+                                    (historico_geral['email_aluno'] == st.session_state.email) &
+                                    (historico_geral['exercicio'] == row['exercicio'])
+                                ]
+                                if not filtro.empty:
+                                    carga_ant = float(filtro.iloc[-1]['carga'])
+                            st.session_state.cargas_sessao[chave] = carga_ant
 
-                    # Persiste progresso via query_params (síncrono e confiável)
-                    try:
-                        progresso = {
-                            'ex_index':      st.session_state.ex_index,
-                            'treino_ativo':  selecao_treino,
-                            'notas_sessao':  st.session_state.notas_sessao,
-                            'cargas_sessao': st.session_state.cargas_sessao,
-                        }
-                        st.query_params["prog"] = json.dumps(progresso)
-                    except:
-                        pass
-
-                    # ---- TELA DE CONCLUSÃO ----
+                    # ---- TELA DE CONCLUSÃƒO ----
                     if st.session_state.treino_finalizado:
                         vol_hoje = calcular_volume(exercicios_df, st.session_state.cargas_sessao)
                         vol_ant = volume_anterior(historico_geral, st.session_state.email,
@@ -2256,8 +1067,8 @@ else:
                                     "diff": carga_hoje - carga_ant
                                 })
 
-                        conclusao_emoji = "🏆" if recordes else "✅"
-                        conclusao_msg = "Recordes Quebrados!" if recordes else "Treino Concluído!"
+                        conclusao_emoji = "ðŸ†" if recordes else "âœ…"
+                        conclusao_msg = "Recordes Quebrados!" if recordes else "Treino ConcluÃ­do!"
                         st.markdown(f"""
                             <div class='conclusao-card'>
                                 <div style='font-size:3rem'>{conclusao_emoji}</div>
@@ -2280,19 +1091,19 @@ else:
                                 </div>
                                 <div class='stat-box'>
                                     <div class='stat-val'>{total_ex}</div>
-                                    <div class='stat-lbl'>Exercícios</div>
+                                    <div class='stat-lbl'>ExercÃ­cios</div>
                                 </div>
                             </div>
                         """, unsafe_allow_html=True)
 
                         if recordes:
                             st.markdown(
-                                "<p style='color:#F9C03D;font-family:Inter;font-size:11px;letter-spacing:2px;text-align:center;text-transform:uppercase;margin:16px 0 8px;'>🔥 PRs Quebrados Hoje</p>",
+                                "<p style='color:#F9C03D;font-family:Inter;font-size:11px;letter-spacing:2px;text-align:center;text-transform:uppercase;margin:16px 0 8px;'>ðŸ”¥ PRs Quebrados Hoje</p>",
                                 unsafe_allow_html=True
                             )
                             badges = "".join([
                                 f"<div class='record-badge'>{r['exercicio']}<br>"
-                                f"<span>{r['antes']:.1f} → {r['depois']:.1f} kg (+{r['diff']:.1f})</span></div>"
+                                f"<span>{r['antes']:.1f} â†’ {r['depois']:.1f} kg (+{r['diff']:.1f})</span></div>"
                                 for r in recordes
                             ])
                             st.markdown(badges, unsafe_allow_html=True)
@@ -2302,15 +1113,9 @@ else:
                         if st.button("+ Novo Treino", use_container_width=True):
                             st.session_state.ex_index = 0
                             st.session_state.cargas_sessao = {}
-                            st.session_state.cargas_anteriores = {}
                             st.session_state.treino_finalizado = False
                             st.session_state.notas_sessao = ""
-                            st.session_state.prog_restaurado = True
                             st.cache_data.clear()
-                            try:
-                                st.query_params.clear()
-                            except:
-                                pass
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2318,6 +1123,8 @@ else:
                     else:
                         idx_atual = st.session_state.ex_index
                         row = exercicios_df.iloc[idx_atual]
+                        exercicio_nome_html = html.escape(str(row['exercicio']))
+                        treino_nome_html = html.escape(str(selecao_treino))
                         chave = f"carga_{idx_atual}"
                         carga_atual = st.session_state.cargas_sessao[chave]
 
@@ -2326,113 +1133,77 @@ else:
                             <div class='progress-bar-bg'>
                                 <div class='progress-bar-fill' style='width:{pct}%;'></div>
                             </div>
-                            <p class='progress-label'>Exercício {idx_atual + 1} de {total_ex}</p>
+                            <p class='progress-label'>ExercÃ­cio {idx_atual + 1} de {total_ex}</p>
                         """, unsafe_allow_html=True)
 
                         series = int(float(row['series'])) if pd.notnull(row.get('series')) else 0
                         reps   = int(float(row['reps']))   if pd.notnull(row.get('reps'))   else 0
 
-                        carga_anterior_exib = st.session_state.cargas_anteriores.get(f"ant_{idx_atual}", 0.0)
                         st.markdown(f"""
                             <div class='ex-card'>
-                                <p class='ex-label'>{selecao_treino}</p>
-                                <p class='ex-name'>{row['exercicio']}</p>
-                                <p class='ex-meta'>{series} SÉRIES × {reps} REPS</p>
-                                <p class='ex-pr'>Última carga: {carga_anterior_exib:.1f} kg</p>
+                                <p class='ex-label'>{treino_nome_html}</p>
+                                <p class='ex-name'>{exercicio_nome_html}</p>
+                                <p class='ex-meta'>{series} SÃ‰RIES Ã— {reps} REPS</p>
+                                <p class='ex-pr'>Ãšltima carga: {carga_atual:.1f} kg</p>
                             </div>
                         """, unsafe_allow_html=True)
 
                         video_url = row.get('video_url', '')
                         if pd.notnull(video_url) and str(video_url).startswith('http'):
                             embed = video_url.split('?')[0].replace('/view', '/preview').replace('/edit', '/preview')
-                            with st.expander("🎬 Ver Execução"):
-                                st.components.v1.html(f'<iframe src="{embed}" width="100%" height="200" frameborder="0"></iframe>', height=210)
+                            with st.expander("ðŸŽ¬ Ver ExecuÃ§Ã£o"):
+                                st.components.v1.html(f'<div style="position:relative;width:100%;padding-top:56.25%;overflow:hidden;border-radius:12px;background:#111;"><iframe src="{embed}" style="position:absolute;inset:0;width:100%;height:100%;border:0;" allowfullscreen></iframe></div>', height=260)
 
-                        # --- INPUT EDITÁVEL + BOTÕES DE AJUSTE ---
-                        # O number_input é a fonte da verdade — gerenciado pela própria key do Streamlit.
-                        # ── CARGA: input editável + botões de ajuste ──────────────
-                        # fonte de verdade = cargas_sessao[chave] (preenchido no pré-load)
-                        input_key = f"input_carga_{idx_atual}"
+                        st.markdown(f"""
+                            <div class='carga-display'>
+                                <p class='carga-valor'>{carga_atual:.1f}</p>
+                                <p class='carga-unit'>KG</p>
+                            </div>
+                        """, unsafe_allow_html=True)
 
-                        # Sincroniza input_key com cargas_sessao SEMPRE,
-                        # não apenas na primeira vez — evita zero ao navegar
-                        carga_fonte = st.session_state.cargas_sessao.get(chave, 0.0)
-                        if input_key not in st.session_state:
-                            st.session_state[input_key] = float(carga_fonte)
-
-                        # Callback dos botões: atualiza as duas fontes atomicamente
-                        def _ajustar(delta, _input_key, _chave):
-                            atual = st.session_state.cargas_sessao.get(_chave, 0.0)
-                            novo  = max(0.0, round(atual + delta, 1))
-                            st.session_state[_input_key]          = novo
-                            st.session_state.cargas_sessao[_chave] = novo
-
-                        # Campo de digitação centralizado (ANTES dos botões)
-                        col_inp_l, col_inp, col_inp_r = st.columns([1, 3, 1])
-                        with col_inp:
-                            st.number_input(
-                                "Carga (kg)",
-                                min_value=0.0,
-                                max_value=999.0,
-                                step=0.5,
-                                format="%.1f",
-                                key=input_key,
-                                label_visibility="collapsed",
-                                on_change=lambda: st.session_state.cargas_sessao.update(
-                                    {chave: st.session_state[input_key]}
-                                )
-                            )
-
-                        # Botões de ajuste rápido
-                        c1, c2, c3, c4 = st.columns(4)
+                        c1, c2 = st.columns(2)
                         with c1:
-                            st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True,
-                                      on_click=_ajustar, args=(-2.5, input_key, chave))
+                            if st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True):
+                                st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 2.5)
+                                st.rerun()
                         with c2:
-                            st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True,
-                                      on_click=_ajustar, args=(-0.5, input_key, chave))
-                        with c3:
-                            st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True,
-                                      on_click=_ajustar, args=(0.5, input_key, chave))
-                        with c4:
-                            st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True,
-                                      on_click=_ajustar, args=(2.5, input_key, chave))
-                        # Mantém cargas_sessao em sincronia com o que está no widget
-                        st.session_state.cargas_sessao[chave] = st.session_state.get(input_key, carga_fonte)
+                            if st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True):
+                                st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 0.5)
+                                st.rerun()
 
+                        c3, c4 = st.columns(2)
+                        with c3:
+                            if st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True):
+                                st.session_state.cargas_sessao[chave] = carga_atual + 0.5
+                                st.rerun()
+                        with c4:
+                            if st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True):
+                                st.session_state.cargas_sessao[chave] = carga_atual + 2.5
+                                st.rerun()
                         st.markdown("<br>", unsafe_allow_html=True)
 
-                        # Botão pular — discreto, só aparece se não for o último
                         eh_ultimo = (idx_atual == total_ex - 1)
-                        if not eh_ultimo:
-                            col_pular_l, col_pular, col_pular_r = st.columns([2, 2, 2])
-                            with col_pular:
-                                if st.button("↷ Pular exercício", key=f"pular_{idx_atual}", use_container_width=True):
-                                    st.session_state.cargas_sessao[chave] = 0.0
-                                    st.session_state.ex_index += 1
-                                    st.toast("Exercício pulado", icon="↷")
-                                    st.rerun()
 
                         if eh_ultimo:
                             notas = st.text_area(
-                                "💬 Feedback do Atleta (opcional)",
+                                "ðŸ’¬ Feedback do Atleta (opcional)",
                                 value=st.session_state.notas_sessao,
-                                placeholder="Como foi o treino? Alguma dor, cansaço, observação...",
+                                placeholder="Como foi o treino? Alguma dor, cansaÃ§o, observaÃ§Ã£o...",
                                 key="notas_final"
                             )
                             st.session_state.notas_sessao = notas
                             col_ant, col_fin = st.columns(2)
                             with col_ant:
-                                if st.button("← Anterior", key="btn_ant_final", use_container_width=True):
+                                if st.button("â† Anterior", key="btn_ant_final", use_container_width=True):
                                     st.session_state.ex_index -= 1
                                     st.rerun()
                             with col_fin:
                                 st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-                                if st.button("FINALIZAR TREINO ✓", key="btn_finalizar", use_container_width=True):
+                                if st.button("FINALIZAR TREINO âœ“", key="btn_finalizar", use_container_width=True):
                                     lista = []
                                     for i, r in exercicios_df.iterrows():
                                         lista.append({
-                                            "data": agora_brasilia_naive().strftime("%d/%m/%Y %H:%M"),
+                                            "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
                                             "email_aluno": st.session_state.email,
                                             "treino": selecao_treino,
                                             "exercicio": r['exercicio'],
@@ -2444,26 +1215,21 @@ else:
                                     conn.update(worksheet="registros", data=pd.concat([existente, df_envio], ignore_index=True))
                                     st.cache_data.clear()
                                     st.session_state.treino_finalizado = True
-                                    try:
-                                        st.query_params.clear()
-                                    except:
-                                        pass
                                     st.rerun()
                                 st.markdown('</div>', unsafe_allow_html=True)
                         else:
                             col_ant, col_prox = st.columns(2)
                             with col_ant:
                                 if idx_atual > 0:
-                                    if st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True):
+                                    if st.button("â† Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True):
                                         st.session_state.ex_index -= 1
                                         st.rerun()
                                 else:
-                                    st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True, disabled=True)
+                                    st.button("â† Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True, disabled=True)
                             with col_prox:
                                 st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-                                if st.button("Próximo →", key=f"btn_prox_{idx_atual}", use_container_width=True):
+                                if st.button("PrÃ³ximo â†’", key=f"btn_prox_{idx_atual}", use_container_width=True):
                                     st.session_state.ex_index += 1
-                                    st.toast("✓ Carga registrada!", icon="💪")
                                     st.rerun()
                                 st.markdown('</div>', unsafe_allow_html=True)
 
