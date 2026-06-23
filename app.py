@@ -836,24 +836,25 @@ else:
                 dias_sem = (hoje - ultima_data).days if ultima_data else None
                 treinou_hoje = ultima_data == hoje if ultima_data else False
                 if treinou_hoje:
-                    situacao = 'Treinou hoje'
-                elif dias_sem is None:
-                    situacao = 'Sem registro'
-                elif dias_sem <= 2:
-                    situacao = 'Recente'
+                    situacao = '🟢 Treinou hoje'
+                    ordem_situacao = 3
+                elif dias_sem is not None and dias_sem <= 3:
+                    situacao = '🟡 Treinou recentemente'
+                    ordem_situacao = 2
                 else:
-                    situacao = 'Sem treinar'
+                    situacao = '🔴 Sem treinar'
+                    ordem_situacao = 1
                 linhas_controle.append({
                     'Aluno': nome_aluno,
-                    'E-mail': email_aluno,
                     'Último treino': ultima_data.strftime('%d/%m/%Y') if ultima_data else '-',
                     'Dias sem treinar': dias_sem if dias_sem is not None else '-',
-                    'Status': situacao
+                    'Status': situacao,
+                    '_ordem': ordem_situacao
                 })
 
             df_controle = pd.DataFrame(linhas_controle)
-            treinou_hoje_qtd = int((df_controle['Status'] == 'Treinou hoje').sum()) if not df_controle.empty else 0
-            sem_treinar_qtd = int(df_controle['Status'].isin(['Sem treinar', 'Sem registro']).sum()) if not df_controle.empty else 0
+            treinou_hoje_qtd = int(df_controle['Status'].astype(str).str.contains('Treinou hoje').sum()) if not df_controle.empty else 0
+            sem_treinar_qtd = int(df_controle['Status'].astype(str).str.contains('Sem treinar').sum()) if not df_controle.empty else 0
             c1, c2, c3 = st.columns(3)
             c1.metric('Alunos', len(df_controle))
             c2.metric('Treinaram hoje', treinou_hoje_qtd)
@@ -862,8 +863,6 @@ else:
                 if df_controle.empty:
                     st.info('Nenhum aluno cadastrado.')
                 else:
-                    ordem_status = {'Sem registro': 0, 'Sem treinar': 1, 'Recente': 2, 'Treinou hoje': 3}
-                    df_controle['_ordem'] = df_controle['Status'].map(ordem_status).fillna(9)
                     df_controle['_dias_ordem'] = pd.to_numeric(df_controle['Dias sem treinar'], errors='coerce').fillna(9999)
                     st.dataframe(
                         df_controle.sort_values(['_ordem', '_dias_ordem'], ascending=[True, False]).drop(columns=['_ordem', '_dias_ordem']),
@@ -875,8 +874,9 @@ else:
                 st.info("Nenhum aluno cadastrado para acompanhamento.")
                 st.stop()
             st.markdown("### 👤 Detalhe do Aluno")
-            nome_sel = st.selectbox("Selecione o Aluno:", df_alunos_coach['nome'].dropna().unique().tolist())
-            email_vinculado = df_alunos_coach[df_alunos_coach['nome'] == nome_sel]['email'].iloc[0]
+            df_alunos_select = df_alunos_coach.sort_values('nome', key=lambda s: s.astype(str).str.lower()).copy()
+            nome_sel = st.selectbox("Selecione o Aluno:", df_alunos_select['nome'].dropna().unique().tolist())
+            email_vinculado = df_alunos_select[df_alunos_select['nome'] == nome_sel]['email'].iloc[0]
 
             if not df_coach.empty:
                 df_coach['email_aluno'] = df_coach['email_aluno'].astype(str).str.strip().str.lower()
