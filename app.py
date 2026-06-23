@@ -592,29 +592,6 @@ else:
 
     st.sidebar.divider()
 
-    with st.sidebar.expander("🔑 Alterar Minha Senha"):
-        nova_senha = st.text_input("Nova Senha", type="password", key="new_pass")
-        confirma_senha = st.text_input("Confirme", type="password", key="conf_pass")
-        if st.button("ATUALIZAR SENHA"):
-            if nova_senha == confirma_senha and len(nova_senha) >= 4:
-                try:
-                    df_u = ler_sem_cache("usuarios")
-                    mask = df_u['email'].astype(str).str.strip().str.lower() == st.session_state.email.lower()
-                    if mask.any():
-                        df_u.loc[mask, 'senha'] = str(nova_senha).strip()
-                        conn.update(worksheet="usuarios", data=df_u)
-                        st.sidebar.success("Senha alterada!")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.sidebar.error("Usuário não encontrado.")
-                except Exception as e:
-                    st.sidebar.error(f"Erro: {e}")
-            elif len(nova_senha) < 4:
-                st.sidebar.warning("Mínimo 4 caracteres.")
-            else:
-                st.sidebar.error("As senhas não coincidem.")
-
     # ---- PAINEL DO COACH ----
     ativar_dashboard = False
     if st.session_state.email == EMAIL_COACH:
@@ -646,7 +623,11 @@ else:
                     st.write(f"Linhas encontradas: {len(df_aluno)}")
 
                 if not df_aluno.empty:
-                    df_aluno['data'] = pd.to_datetime(df_aluno['data'], dayfirst=True)
+                    df_aluno['data'] = pd.to_datetime(df_aluno['data'], dayfirst=True, errors='coerce')
+                    df_aluno = df_aluno.dropna(subset=['data'])
+                    if df_aluno.empty:
+                        st.info(f"{nome_sel} ainda não possui treinos com data válida.")
+                        st.stop()
                     exercicio_sel = st.selectbox("Exercício:", df_aluno['exercicio'].unique())
                     df_prog = df_aluno[df_aluno['exercicio'] == exercicio_sel].sort_values('data')
                     df_prog['data_display'] = df_prog['data'].dt.strftime('%d/%m/%Y')
@@ -664,7 +645,8 @@ else:
                 df_ci = ler_sem_cache("checkins")
                 if not df_ci.empty:
                     df_ci['email'] = df_ci['email'].astype(str).str.strip().str.lower()
-                    df_ci['data'] = pd.to_datetime(df_ci['data'], dayfirst=True)
+                    df_ci['data'] = pd.to_datetime(df_ci['data'], dayfirst=True, errors='coerce')
+                    df_ci = df_ci.dropna(subset=['data'])
                     df_f = df_ci[df_ci['email'] == email_vinculado].sort_values('data')
                     if not df_f.empty:
                         st.dataframe(df_f.sort_values('data', ascending=False),
