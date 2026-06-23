@@ -142,6 +142,122 @@ def volume_anterior(historico: pd.DataFrame, email: str, treino: str,
     except:
         return 0.0
 
+
+def _valor_linha(row, candidatos, padrao=""):
+    for col in candidatos:
+        if col in row.index:
+            val = row.get(col)
+            if pd.notnull(val) and str(val).strip().lower() not in ("", "nan", "none"):
+                return val
+    return padrao
+
+def _data_vencimento_aluno(row):
+    hoje = datetime.now().date()
+    valor = _valor_linha(row, [
+        "data_vencimento", "vencimento", "vencimento_pagamento",
+        "dia_vencimento", "dia_pagamento", "dia_pgto"
+    ], "")
+    if valor == "":
+        return None
+
+    try:
+        if isinstance(valor, (int, float)) and not pd.isna(valor):
+            dia = int(valor)
+        else:
+            texto = str(valor).strip()
+            if texto.replace(".0", "").isdigit():
+                dia = int(float(texto))
+            else:
+                data = pd.to_datetime(texto, dayfirst=True, errors="coerce")
+                if pd.isna(data):
+                    return None
+                data = data.date()
+                if data < hoje.replace(day=1):
+                    dia = data.day
+                else:
+                    return data
+
+        import calendar as cal_lib
+        ultimo_dia = cal_lib.monthrange(hoje.year, hoje.month)[1]
+        return hoje.replace(day=max(1, min(dia, ultimo_dia)))
+    except:
+        return None
+
+def _pagamento_mes_ok(email: str, vencimento, pagamentos: pd.DataFrame) -> bool:
+    if pagamentos.empty or "email" not in pagamentos.columns:
+        return False
+
+    df = pagamentos.copy()
+    df["email"] = df["email"].astype(str).str.strip().str.lower()
+    df = df[df["email"] == str(email).strip().lower()]
+    if df.empty:
+        return False
+
+    status_col = next((c for c in ["status", "situacao", "situação"] if c in df.columns), None)
+    if status_col:
+        df = df[df[status_col].astype(str).str.strip().str.lower().isin(["pago", "paid", "ok", "quitado", "recebido"])]
+        if df.empty:
+            return False
+
+    mes_ref = vencimento.month if vencimento else datetime.now().month
+    ano_ref = vencimento.year if vencimento else datetime.now().year
+
+    ref_col = next((c for c in ["referencia", "referência", "mes", "mês", "competencia", "competência"] if c in df.columns), None)
+    if ref_col:
+        refs = df[ref_col].astype(str).str.lower()
+        if refs.str.contains(f"{mes_ref:02d}/{ano_ref}", regex=False).any() or refs.str.contains(f"{mes_ref}/{ano_ref}", regex=False).any():
+            return True
+
+    for col in ["data", "data_pagamento", "pagamento", "data_vencimento", "vencimento"]:
+        if col in df.columns:
+            datas = pd.to_datetime(df[col], dayfirst=True, errors="coerce")
+            if ((datas.dt.month == mes_ref) & (datas.dt.year == ano_ref)).any():
+                return True
+
+    return False
+
+def status_pagamento_aluno(row, pagamentos: pd.DataFrame) -> dict:
+    email = str(_valor_linha(row, ["email"], "")).strip().lower()
+    vencimento = _data_vencimento_aluno(row)
+    if not vencimento:
+        return {
+            "email": email,
+            "vencimento": None,
+            "dias": None,
+            "pago": False,
+            "status": "Sem vencimento cadastrado",
+            "alertar_aluno": False,
+            "alertar_coach": False,
+        }
+
+    pago = _pagamento_mes_ok(email, vencimento, pagamentos)
+    dias = (vencimento - datetime.now().date()).days
+    if pago:
+        status = "Pago"
+    elif dias < 0:
+        status = f"Atrasado há {abs(dias)} dia(s)"
+    elif dias == 0:
+        status = "Vence hoje"
+    else:
+        status = f"Vence em {dias} dia(s)"
+
+    return {
+        "email": email,
+        "vencimento": vencimento,
+        "dias": dias,
+        "pago": pago,
+        "status": status,
+        "alertar_aluno": (not pago and dias <= 5),
+        "alertar_coach": (not pago and dias <= 5),
+    }
+
+def carregar_pagamentos_seguro() -> pd.DataFrame:
+    try:
+        return ler_sem_cache("pagamentos")
+    except:
+        return pd.DataFrame(columns=["data", "email", "referencia", "valor", "status", "observacao"])
+
+
 # --- 8. CSS GLOBAL ---
 st.markdown(f"""
     <style>
@@ -610,8 +726,67 @@ else:
 
         if not df_usuarios.empty:
             df_usuarios['email'] = df_usuarios['email'].astype(str).str.strip().str.lower()
-            nome_sel = st.selectbox("Selecione o Aluno:", df_usuarios['nome'].dropna().unique().tolist())
-            email_vinculado = df_usuarios[df_usuarios['nome'] == nome_sel]['email'].iloc[0]
+            df_alunos_coach = df_usuarios[df_usuarios['email'] != EMAIL_COACH.lower()].copy()
+
+            # ---- CONTROLE GERAL DE TREINOS ----
+            hoje = datetime.now().date()
+            registros_validos = pd.DataFrame()
+            if not df_coach.empty and 'email_aluno' in df_coach.columns and 'data' in df_coach.columns:
+                registros_validos = df_coach.copy()
+                registros_validos['email_aluno'] = registros_validos['email_aluno'].astype(str).str.strip().str.lower()
+                registros_validos['data_dt'] = pd.to_datetime(registros_validos['data'], dayfirst=True, errors='coerce')
+                registros_validos = registros_validos.dropna(subset=['data_dt'])
+                registros_validos['data_dia'] = registros_validos['data_dt'].dt.date
+
+            linhas_controle = []
+            for _, aluno in df_alunos_coach.iterrows():
+                email_aluno = str(aluno.get('email', '')).strip().lower()
+                nome_aluno = str(aluno.get('nome', email_aluno)).strip() or email_aluno
+                hist_aluno = registros_validos[registros_validos['email_aluno'] == email_aluno] if not registros_validos.empty else pd.DataFrame()
+                ultima_data = hist_aluno['data_dia'].max() if not hist_aluno.empty else None
+                dias_sem = (hoje - ultima_data).days if ultima_data else None
+                treinou_hoje = ultima_data == hoje if ultima_data else False
+                if treinou_hoje:
+                    situacao = 'Treinou hoje'
+                elif dias_sem is None:
+                    situacao = 'Sem registro'
+                elif dias_sem <= 2:
+                    situacao = 'Recente'
+                else:
+                    situacao = 'Sem treinar'
+                linhas_controle.append({
+                    'Aluno': nome_aluno,
+                    'E-mail': email_aluno,
+                    'Último treino': ultima_data.strftime('%d/%m/%Y') if ultima_data else '-',
+                    'Dias sem treinar': dias_sem if dias_sem is not None else '-',
+                    'Status': situacao
+                })
+
+            df_controle = pd.DataFrame(linhas_controle)
+            treinou_hoje_qtd = int((df_controle['Status'] == 'Treinou hoje').sum()) if not df_controle.empty else 0
+            sem_treinar_qtd = int(df_controle['Status'].isin(['Sem treinar', 'Sem registro']).sum()) if not df_controle.empty else 0
+            c1, c2, c3 = st.columns(3)
+            c1.metric('Alunos', len(df_controle))
+            c2.metric('Treinaram hoje', treinou_hoje_qtd)
+            c3.metric('Sem treinar', sem_treinar_qtd)
+            with st.expander('📌 Controle de treinos dos alunos', expanded=True):
+                if df_controle.empty:
+                    st.info('Nenhum aluno cadastrado.')
+                else:
+                    ordem_status = {'Sem registro': 0, 'Sem treinar': 1, 'Recente': 2, 'Treinou hoje': 3}
+                    df_controle['_ordem'] = df_controle['Status'].map(ordem_status).fillna(9)
+                    df_controle['_dias_ordem'] = pd.to_numeric(df_controle['Dias sem treinar'], errors='coerce').fillna(9999)
+                    st.dataframe(
+                        df_controle.sort_values(['_ordem', '_dias_ordem'], ascending=[True, False]).drop(columns=['_ordem', '_dias_ordem']),
+                        hide_index=True,
+                        use_container_width=True
+                    )
+            st.divider()
+            if df_alunos_coach.empty:
+                st.info("Nenhum aluno cadastrado para acompanhamento.")
+                st.stop()
+            nome_sel = st.selectbox("Selecione o Aluno:", df_alunos_coach['nome'].dropna().unique().tolist())
+            email_vinculado = df_alunos_coach[df_alunos_coach['nome'] == nome_sel]['email'].iloc[0]
 
             if not df_coach.empty:
                 df_coach['email_aluno'] = df_coach['email_aluno'].astype(str).str.strip().str.lower()
@@ -758,61 +933,38 @@ else:
                 st.error(f"Erro check-ins: {e}")
 
             st.divider()
-            st.markdown("### 💳 Pagamentos")
+            st.markdown('### 💳 Alertas de Pagamento')
             try:
-                try:
-                    df_pag = ler_sem_cache("pagamentos")
-                except:
-                    df_pag = pd.DataFrame(columns=["data", "email", "referencia", "valor", "status", "observacao"])
-                if not df_pag.empty and 'email' in df_pag.columns:
-                    df_pag['email'] = df_pag['email'].astype(str).str.strip().str.lower()
-                df_pag_aluno = df_pag[df_pag['email'] == email_vinculado].copy() if not df_pag.empty and 'email' in df_pag.columns else pd.DataFrame()
-
-                with st.form('form_pagamento_coach', clear_on_submit=True):
-                    col_data, col_ref = st.columns(2)
-                    with col_data:
-                        data_pag = st.date_input("Data", value=datetime.now().date(), key="pag_data")
-                    with col_ref:
-                        referencia_pag = st.text_input("Referência", placeholder="Ex.: Julho/2026", key="pag_ref")
-                    col_valor, col_status = st.columns(2)
-                    with col_valor:
-                        valor_pag = st.number_input("Valor (R$)", min_value=0.0, step=10.0, format="%.2f", key="pag_valor")
-                    with col_status:
-                        status_pag = st.selectbox("Status", ["Pago", "Pendente", "Atrasado", "Isento"], key="pag_status")
-                    obs_pag = st.text_area("Observação", key="pag_obs")
-                    if st.form_submit_button("REGISTRAR PAGAMENTO", use_container_width=True):
-                        novo_pag = pd.DataFrame([{
-                            "data": data_pag.strftime("%d/%m/%Y"),
-                            "email": email_vinculado,
-                            "referencia": referencia_pag,
-                            "valor": valor_pag,
-                            "status": status_pag,
-                            "observacao": obs_pag
-                        }])
-                        conn.update(worksheet="pagamentos", data=pd.concat([df_pag, novo_pag], ignore_index=True))
-                        st.success("Pagamento registrado!")
-                        st.cache_data.clear()
-                        st.rerun()
-
-                if df_pag_aluno.empty:
-                    st.info("Nenhum pagamento registrado para este aluno.")
+                df_pag = carregar_pagamentos_seguro()
+                linhas_pag = []
+                for _, aluno in df_alunos_coach.iterrows():
+                    info_pag = status_pagamento_aluno(aluno, df_pag)
+                    nome_aluno = str(aluno.get('nome', info_pag['email'])).strip() or info_pag['email']
+                    linhas_pag.append({
+                        'Aluno': nome_aluno,
+                        'E-mail': info_pag['email'],
+                        'Vencimento': info_pag['vencimento'].strftime('%d/%m/%Y') if info_pag['vencimento'] else '-',
+                        'Dias': info_pag['dias'] if info_pag['dias'] is not None else '-',
+                        'Status': info_pag['status'],
+                        'Pago': 'Sim' if info_pag['pago'] else 'Não'
+                    })
+                df_alertas_pag = pd.DataFrame(linhas_pag)
+                if df_alertas_pag.empty:
+                    st.info('Nenhum aluno para acompanhar pagamentos.')
                 else:
-                    df_pag_aluno['data_dt'] = pd.to_datetime(df_pag_aluno['data'], dayfirst=True, errors='coerce') if 'data' in df_pag_aluno.columns else pd.NaT
-                    df_pag_aluno = df_pag_aluno.sort_values('data_dt', ascending=False)
-                    cols_pag = [c for c in ['data', 'referencia', 'valor', 'status', 'observacao'] if c in df_pag_aluno.columns]
-                    st.dataframe(
-                        df_pag_aluno[cols_pag].rename(columns={
-                            'data': 'Data',
-                            'referencia': 'Referência',
-                            'valor': 'Valor (R$)',
-                            'status': 'Status',
-                            'observacao': 'Observação'
-                        }),
-                        hide_index=True,
-                        use_container_width=True
-                    )
+                    df_alertas_pag['_dias_ordem'] = pd.to_numeric(df_alertas_pag['Dias'], errors='coerce')
+                    df_nao_pagos = df_alertas_pag[df_alertas_pag['Pago'] == 'Não'].copy()
+                    df_alerta = df_nao_pagos[df_nao_pagos['_dias_ordem'].notna() & (df_nao_pagos['_dias_ordem'] <= 5)].copy()
+                    if df_alerta.empty:
+                        st.success('Nenhum pagamento vencido ou próximo do vencimento nos próximos 5 dias.')
+                    else:
+                        st.warning(f'{len(df_alerta)} aluno(s) com pagamento vencido ou próximo do vencimento.')
+                        st.dataframe(df_alerta.sort_values('_dias_ordem').drop(columns=['_dias_ordem']), hide_index=True, use_container_width=True)
+                    with st.expander('Ver todos os pagamentos do mês'):
+                        st.dataframe(df_alertas_pag.sort_values(['Pago', '_dias_ordem']).drop(columns=['_dias_ordem']), hide_index=True, use_container_width=True)
+                st.caption('O alerta usa o vencimento cadastrado no aluno. Colunas aceitas: dia_vencimento, vencimento, data_vencimento, vencimento_pagamento, dia_pagamento ou dia_pgto. Um pagamento é considerado quitado quando a aba pagamentos tiver status Pago/OK/Quitado/Recebido no mês de referência.')
             except Exception as e:
-                st.error(f"Erro pagamentos: {e}")
+                st.error(f'Erro alertas de pagamento: {e}')
 
     # ==========================================================
     # ÁREA DO ATLETA
@@ -832,6 +984,34 @@ else:
                 <div class='mobile-account-email'>{html.escape(st.session_state.email)}</div>
             </div>
         """, unsafe_allow_html=True)
+
+        # ---- ALERTA DE PAGAMENTO ----
+        try:
+            df_pag_aluno_alerta = carregar_pagamentos_seguro()
+            df_u_alerta = ler_planilha('usuarios')
+            df_u_alerta['email'] = df_u_alerta['email'].astype(str).str.strip().str.lower()
+            linha_pag_aluno = df_u_alerta[df_u_alerta['email'] == st.session_state.email.lower()]
+            if not linha_pag_aluno.empty:
+                info_pag_aluno = status_pagamento_aluno(linha_pag_aluno.iloc[0], df_pag_aluno_alerta)
+                if info_pag_aluno['alertar_aluno']:
+                    venc_txt = info_pag_aluno['vencimento'].strftime('%d/%m/%Y') if info_pag_aluno['vencimento'] else ''
+                    if info_pag_aluno['dias'] is not None and info_pag_aluno['dias'] < 0:
+                        texto_pag = f'Sua mensalidade venceu em {venc_txt}. Regularize para manter sua consultoria ativa.'
+                    elif info_pag_aluno['dias'] == 0:
+                        texto_pag = 'Sua mensalidade vence hoje. Regularize para manter sua consultoria ativa.'
+                    else:
+                        texto_pag = f'Sua mensalidade vence em {info_pag_aluno["dias"]} dia(s), em {venc_txt}.'
+                    st.markdown(f"""
+                        <div class='coach-alert'>
+                            <div class='coach-alert-header'>
+                                <span class='coach-alert-label'>💳 Aviso de Pagamento</span>
+                                <span class='coach-alert-dot'></span>
+                            </div>
+                            <div class='coach-alert-texto'>{html.escape(texto_pag)}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+        except:
+            pass
 
         with st.expander("⚙️ Configurações"):
             tab_senha, tab_sair = st.tabs(["Senha", "Sair"])
@@ -1237,4 +1417,5 @@ else:
 
             except Exception as e:
                 st.error(f"Erro: {e}")
+
 
