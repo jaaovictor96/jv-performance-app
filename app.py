@@ -860,15 +860,15 @@ else:
                 })
 
             df_controle = pd.DataFrame(linhas_controle)
-            with st.expander('📌 Controle de treinos dos alunos', expanded=True):
-                if df_controle.empty:
-                    st.info('Nenhum aluno cadastrado.')
-                else:
-                    st.dataframe(
-                        df_controle.sort_values(['_ordem', '_dias_ordem'], ascending=[True, True]).drop(columns=['_ordem', '_dias_ordem']),
-                        hide_index=True,
-                        use_container_width=True
-                    )
+            st.markdown('### 📌 Frequência')
+            if df_controle.empty:
+                st.info('Nenhum aluno cadastrado.')
+            else:
+                st.dataframe(
+                    df_controle.sort_values(['_ordem', '_dias_ordem'], ascending=[True, True]).drop(columns=['_ordem', '_dias_ordem']),
+                    hide_index=True,
+                    use_container_width=True
+                )
 
             st.markdown('### 💳 Pagamentos')
             try:
@@ -919,7 +919,11 @@ else:
                 st.stop()
             st.markdown("### 👤 Detalhe do Aluno")
             df_alunos_select = df_alunos_coach.sort_values('nome', key=lambda s: s.astype(str).str.lower()).copy()
-            nome_sel = st.selectbox("Selecione o Aluno:", df_alunos_select['nome'].dropna().unique().tolist())
+            opcoes_alunos = ['Nenhum aluno selecionado'] + df_alunos_select['nome'].dropna().unique().tolist()
+            nome_sel = st.selectbox("Selecione o Aluno:", opcoes_alunos, index=0)
+            if nome_sel == 'Nenhum aluno selecionado':
+                st.info('Selecione um aluno para visualizar calendário, histórico, progressão e registrar pagamento.')
+                st.stop()
             email_vinculado = df_alunos_select[df_alunos_select['nome'] == nome_sel]['email'].iloc[0]
 
             if not df_coach.empty:
