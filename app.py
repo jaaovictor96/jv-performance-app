@@ -837,35 +837,32 @@ else:
                 treinou_hoje = ultima_data == hoje if ultima_data else False
                 if treinou_hoje:
                     situacao = '🟢 Treinou hoje'
+                    ordem_situacao = 1
+                elif dias_sem is None:
+                    situacao = '🔴 Sem registro'
                     ordem_situacao = 3
-                elif dias_sem is not None and dias_sem <= 3:
-                    situacao = '🟡 Treinou recentemente'
+                elif dias_sem <= 3:
+                    unidade = 'dia' if dias_sem == 1 else 'dias'
+                    situacao = f'🟡 {dias_sem} {unidade} sem treinar'
                     ordem_situacao = 2
                 else:
-                    situacao = '🔴 Sem treinar'
-                    ordem_situacao = 1
+                    situacao = f'🔴 {dias_sem} dias sem treinar'
+                    ordem_situacao = 3
                 linhas_controle.append({
                     'Aluno': nome_aluno,
                     'Último treino': ultima_data.strftime('%d/%m/%Y') if ultima_data else '-',
-                    'Dias sem treinar': dias_sem if dias_sem is not None else '-',
-                    'Status': situacao,
+                    'Situação': situacao,
+                    '_dias_ordem': dias_sem if dias_sem is not None else 9999,
                     '_ordem': ordem_situacao
                 })
 
             df_controle = pd.DataFrame(linhas_controle)
-            treinou_hoje_qtd = int(df_controle['Status'].astype(str).str.contains('Treinou hoje').sum()) if not df_controle.empty else 0
-            sem_treinar_qtd = int(df_controle['Status'].astype(str).str.contains('Sem treinar').sum()) if not df_controle.empty else 0
-            c1, c2, c3 = st.columns(3)
-            c1.metric('Alunos', len(df_controle))
-            c2.metric('Treinaram hoje', treinou_hoje_qtd)
-            c3.metric('Sem treinar', sem_treinar_qtd)
             with st.expander('📌 Controle de treinos dos alunos', expanded=True):
                 if df_controle.empty:
                     st.info('Nenhum aluno cadastrado.')
                 else:
-                    df_controle['_dias_ordem'] = pd.to_numeric(df_controle['Dias sem treinar'], errors='coerce').fillna(9999)
                     st.dataframe(
-                        df_controle.sort_values(['_ordem', '_dias_ordem'], ascending=[True, False]).drop(columns=['_ordem', '_dias_ordem']),
+                        df_controle.sort_values(['_ordem', '_dias_ordem'], ascending=[True, True]).drop(columns=['_ordem', '_dias_ordem']),
                         hide_index=True,
                         use_container_width=True
                     )
@@ -1539,6 +1536,7 @@ else:
 
             except Exception as e:
                 st.error(f"Erro: {e}")
+
 
 
 
