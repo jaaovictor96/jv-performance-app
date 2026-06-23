@@ -183,13 +183,47 @@ def _data_vencimento_aluno(row):
     except:
         return None
 
+def _coluna_email_pagamento(pagamentos: pd.DataFrame):
+    return next((c for c in ["email_aluno", "email"] if c in pagamentos.columns), None)
+
+def _coluna_data_pagamento(pagamentos: pd.DataFrame):
+    return next((c for c in ["data_pagamento", "data", "pagamento"] if c in pagamentos.columns), None)
+
+def _vencimento_por_pagamentos(email: str, pagamentos: pd.DataFrame):
+    email_col = _coluna_email_pagamento(pagamentos)
+    if pagamentos.empty or not email_col or "vencimento" not in pagamentos.columns:
+        return None
+    df = pagamentos.copy()
+    df[email_col] = df[email_col].astype(str).str.strip().str.lower()
+    df = df[df[email_col] == str(email).strip().lower()]
+    if df.empty:
+        return None
+    data_col = _coluna_data_pagamento(df)
+    if data_col:
+        df["_data_dt"] = pd.to_datetime(df[data_col], dayfirst=True, errors="coerce")
+        df = df.sort_values("_data_dt")
+    ultimo = df.iloc[-1]
+    valor = ultimo.get("vencimento", "")
+    if pd.isna(valor) or str(valor).strip() == "":
+        return None
+    try:
+        dia = int(float(str(valor).strip()))
+        hoje = datetime.now().date()
+        import calendar as cal_lib
+        ultimo_dia = cal_lib.monthrange(hoje.year, hoje.month)[1]
+        return hoje.replace(day=max(1, min(dia, ultimo_dia)))
+    except:
+        data = pd.to_datetime(valor, dayfirst=True, errors="coerce")
+        return None if pd.isna(data) else data.date()
+
 def _pagamento_mes_ok(email: str, vencimento, pagamentos: pd.DataFrame) -> bool:
-    if pagamentos.empty or "email" not in pagamentos.columns:
+    email_col = _coluna_email_pagamento(pagamentos)
+    if pagamentos.empty or not email_col:
         return False
 
     df = pagamentos.copy()
-    df["email"] = df["email"].astype(str).str.strip().str.lower()
-    df = df[df["email"] == str(email).strip().lower()]
+    df[email_col] = df[email_col].astype(str).str.strip().str.lower()
+    df = df[df[email_col] == str(email).strip().lower()]
     if df.empty:
         return False
 
@@ -208,17 +242,19 @@ def _pagamento_mes_ok(email: str, vencimento, pagamentos: pd.DataFrame) -> bool:
         if refs.str.contains(f"{mes_ref:02d}/{ano_ref}", regex=False).any() or refs.str.contains(f"{mes_ref}/{ano_ref}", regex=False).any():
             return True
 
-    for col in ["data", "data_pagamento", "pagamento", "data_vencimento", "vencimento"]:
-        if col in df.columns:
-            datas = pd.to_datetime(df[col], dayfirst=True, errors="coerce")
-            if ((datas.dt.month == mes_ref) & (datas.dt.year == ano_ref)).any():
-                return True
+    data_col = _coluna_data_pagamento(df)
+    if data_col:
+        datas = pd.to_datetime(df[data_col], dayfirst=True, errors="coerce")
+        if ((datas.dt.month == mes_ref) & (datas.dt.year == ano_ref)).any():
+            return True
 
     return False
 
 def status_pagamento_aluno(row, pagamentos: pd.DataFrame) -> dict:
     email = str(_valor_linha(row, ["email"], "")).strip().lower()
     vencimento = _data_vencimento_aluno(row)
+    if not vencimento:
+        vencimento = _vencimento_por_pagamentos(email, pagamentos)
     if not vencimento:
         return {
             "email": email,
@@ -255,7 +291,54 @@ def carregar_pagamentos_seguro() -> pd.DataFrame:
     try:
         return ler_sem_cache("pagamentos")
     except:
-        return pd.DataFrame(columns=["data", "email", "referencia", "valor", "status", "observacao"])
+        return pd.DataFrame(columns=["email_aluno", "valor", "vencimento", "status", "data_pagamento", "chave_pix"])
+
+def registrar_pagamento_aluno(pagamentos: pd.DataFrame, aluno_row, data_pagamento):
+    df = pagamentos.copy()
+    estrutura = ["email_aluno", "valor", "vencimento", "status", "data_pagamento", "chave_pix"]
+    if df.empty:
+        df = pd.DataFrame(columns=estrutura)
+    for col in estrutura:
+        if col not in df.columns:
+            df[col] = ""
+
+    email = str(_valor_linha(aluno_row, ["email"], "")).strip().lower()
+    vencimento_info = status_pagamento_aluno(aluno_row, df).get("vencimento")
+    vencimento_dia = vencimento_info.day if vencimento_info else _valor_linha(aluno_row, ["vencimento", "dia_vencimento"], "")
+    email_col = _coluna_email_pagamento(df) or "email_aluno"
+    data_col = _coluna_data_pagamento(df) or "data_pagamento"
+
+    df[email_col] = df[email_col].astype(str).str.strip().str.lower()
+    datas = pd.to_datetime(df[data_col], dayfirst=True, errors="coerce") if data_col in df.columns else pd.Series(pd.NaT, index=df.index)
+    mesmo_aluno = df[email_col] == email
+    mesmo_mes = (datas.dt.month == data_pagamento.month) & (datas.dt.year == data_pagamento.year)
+    mask = mesmo_aluno & mesmo_mes
+
+    historico_aluno = df[df[email_col] == email]
+    ultimo = historico_aluno.iloc[-1] if not historico_aluno.empty else pd.Series(dtype=object)
+    valor = _valor_linha(ultimo, ["valor"], _valor_linha(aluno_row, ["valor", "mensalidade"], ""))
+    chave_pix = _valor_linha(ultimo, ["chave_pix"], _valor_linha(aluno_row, ["chave_pix"], ""))
+
+    if mask.any():
+        idx = df[mask].index[-1]
+        df.loc[idx, "email_aluno"] = email
+        df.loc[idx, "valor"] = valor
+        df.loc[idx, "vencimento"] = vencimento_dia
+        df.loc[idx, "status"] = "pago"
+        df.loc[idx, "data_pagamento"] = data_pagamento.strftime("%d/%m/%Y")
+        df.loc[idx, "chave_pix"] = chave_pix
+    else:
+        novo = pd.DataFrame([{
+            "email_aluno": email,
+            "valor": valor,
+            "vencimento": vencimento_dia,
+            "status": "pago",
+            "data_pagamento": data_pagamento.strftime("%d/%m/%Y"),
+            "chave_pix": chave_pix,
+        }])
+        df = pd.concat([df, novo], ignore_index=True)
+
+    return df[estrutura]
 
 
 # --- 8. CSS GLOBAL ---
@@ -936,17 +1019,54 @@ else:
             st.markdown('### 💳 Alertas de Pagamento')
             try:
                 df_pag = carregar_pagamentos_seguro()
+                linha_aluno_pag = df_alunos_coach[df_alunos_coach['email'] == email_vinculado].iloc[0]
+
+                col_data_pago, col_btn_pago = st.columns([2, 1])
+                with col_data_pago:
+                    data_pago = st.date_input('Data do pagamento', value=datetime.now().date(), key=f'data_pago_{email_vinculado}')
+                with col_btn_pago:
+                    st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+                    if st.button('PAGO', key=f'btn_pago_{email_vinculado}', use_container_width=True):
+                        df_pag_atualizado = registrar_pagamento_aluno(df_pag, linha_aluno_pag, data_pago)
+                        conn.update(worksheet='pagamentos', data=df_pag_atualizado)
+                        st.success(f'Pagamento de {nome_sel} marcado como pago em {data_pago.strftime("%d/%m/%Y")}.')
+                        st.cache_data.clear()
+                        st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
+
                 linhas_pag = []
                 for _, aluno in df_alunos_coach.iterrows():
                     info_pag = status_pagamento_aluno(aluno, df_pag)
                     nome_aluno = str(aluno.get('nome', info_pag['email'])).strip() or info_pag['email']
+                    email_pag = info_pag['email']
+                    df_pag_hist = pd.DataFrame()
+                    email_col = _coluna_email_pagamento(df_pag)
+                    if not df_pag.empty and email_col:
+                        tmp_pag = df_pag.copy()
+                        tmp_pag[email_col] = tmp_pag[email_col].astype(str).str.strip().str.lower()
+                        df_pag_hist = tmp_pag[tmp_pag[email_col] == email_pag].copy()
+                    ultimo_pag = "-"
+                    valor_pag = "-"
+                    chave_pix = "-"
+                    if not df_pag_hist.empty:
+                        data_col = _coluna_data_pagamento(df_pag_hist)
+                        if data_col:
+                            df_pag_hist['_data_dt'] = pd.to_datetime(df_pag_hist[data_col], dayfirst=True, errors='coerce')
+                            df_pag_hist = df_pag_hist.sort_values('_data_dt')
+                        ult = df_pag_hist.iloc[-1]
+                        ultimo_pag = str(_valor_linha(ult, ['data_pagamento', 'data'], '-'))
+                        valor_pag = str(_valor_linha(ult, ['valor'], '-'))
+                        chave_pix = str(_valor_linha(ult, ['chave_pix'], '-'))
                     linhas_pag.append({
                         'Aluno': nome_aluno,
-                        'E-mail': info_pag['email'],
+                        'E-mail': email_pag,
                         'Vencimento': info_pag['vencimento'].strftime('%d/%m/%Y') if info_pag['vencimento'] else '-',
                         'Dias': info_pag['dias'] if info_pag['dias'] is not None else '-',
                         'Status': info_pag['status'],
-                        'Pago': 'Sim' if info_pag['pago'] else 'Não'
+                        'Pago': 'Sim' if info_pag['pago'] else 'Não',
+                        'Último pagamento': ultimo_pag,
+                        'Valor': valor_pag,
+                        'Chave Pix': chave_pix,
                     })
                 df_alertas_pag = pd.DataFrame(linhas_pag)
                 if df_alertas_pag.empty:
@@ -962,7 +1082,7 @@ else:
                         st.dataframe(df_alerta.sort_values('_dias_ordem').drop(columns=['_dias_ordem']), hide_index=True, use_container_width=True)
                     with st.expander('Ver todos os pagamentos do mês'):
                         st.dataframe(df_alertas_pag.sort_values(['Pago', '_dias_ordem']).drop(columns=['_dias_ordem']), hide_index=True, use_container_width=True)
-                st.caption('O alerta usa o vencimento cadastrado no aluno. Colunas aceitas: dia_vencimento, vencimento, data_vencimento, vencimento_pagamento, dia_pagamento ou dia_pgto. Um pagamento é considerado quitado quando a aba pagamentos tiver status Pago/OK/Quitado/Recebido no mês de referência.')
+                st.caption('Estrutura usada: email_aluno, valor, vencimento, status, data_pagamento e chave_pix. O botão PAGO registra/atualiza o pagamento do aluno selecionado no mês da data informada.')
             except Exception as e:
                 st.error(f'Erro alertas de pagamento: {e}')
 
