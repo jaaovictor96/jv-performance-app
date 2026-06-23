@@ -866,6 +866,50 @@ else:
                         hide_index=True,
                         use_container_width=True
                     )
+
+            st.markdown('### 💳 Pagamentos')
+            try:
+                df_pag_resumo = carregar_pagamentos_seguro()
+                linhas_pag_resumo = []
+                for _, aluno_pag in df_alunos_coach.iterrows():
+                    info_pag = status_pagamento_aluno(aluno_pag, df_pag_resumo)
+                    nome_pag = str(aluno_pag.get('nome', info_pag['email'])).strip() or info_pag['email']
+                    vencimento_pag = info_pag['vencimento']
+                    dias_pag = info_pag['dias']
+                    if info_pag['pago']:
+                        status_pag = '🟢 Pago'
+                        ordem_pag = 3
+                    elif dias_pag is None:
+                        status_pag = '⚪ Sem vencimento cadastrado'
+                        ordem_pag = 4
+                    elif dias_pag < 0:
+                        status_pag = f'🔴 Vencido há {abs(dias_pag)} dia(s)'
+                        ordem_pag = 1
+                    elif dias_pag <= 5:
+                        status_pag = f'🟡 Vence em {dias_pag} dia(s)'
+                        ordem_pag = 2
+                    else:
+                        status_pag = f'⚪ Em dia - vence em {dias_pag} dia(s)'
+                        ordem_pag = 3
+                    linhas_pag_resumo.append({
+                        'Aluno': nome_pag,
+                        'Vencimento cadastrado': vencimento_pag.strftime('%d/%m/%Y') if vencimento_pag else '-',
+                        'Status': status_pag,
+                        '_ordem': ordem_pag,
+                        '_dias': dias_pag if dias_pag is not None else 9999,
+                    })
+                df_pag_resumo_tabela = pd.DataFrame(linhas_pag_resumo)
+                if df_pag_resumo_tabela.empty:
+                    st.info('Nenhum aluno para acompanhar pagamentos.')
+                else:
+                    st.dataframe(
+                        df_pag_resumo_tabela.sort_values(['_ordem', '_dias', 'Aluno']).drop(columns=['_ordem', '_dias']),
+                        hide_index=True,
+                        use_container_width=True
+                    )
+            except Exception as e:
+                st.error(f'Erro ao carregar pagamentos: {e}')
+
             st.divider()
             if df_alunos_coach.empty:
                 st.info("Nenhum aluno cadastrado para acompanhamento.")
@@ -1015,7 +1059,7 @@ else:
                 st.error(f"Erro check-ins: {e}")
 
             st.divider()
-            st.markdown('### 💳 Alertas de Pagamento')
+            st.markdown('### 💳 Registrar Pagamento')
             try:
                 df_pag = carregar_pagamentos_seguro()
                 linha_aluno_pag = df_alunos_coach[df_alunos_coach['email'] == email_vinculado].iloc[0]
@@ -1033,57 +1077,9 @@ else:
                         st.rerun()
                     st.markdown('</div>', unsafe_allow_html=True)
 
-                linhas_pag = []
-                for _, aluno in df_alunos_coach.iterrows():
-                    info_pag = status_pagamento_aluno(aluno, df_pag)
-                    nome_aluno = str(aluno.get('nome', info_pag['email'])).strip() or info_pag['email']
-                    email_pag = info_pag['email']
-                    df_pag_hist = pd.DataFrame()
-                    email_col = _coluna_email_pagamento(df_pag)
-                    if not df_pag.empty and email_col:
-                        tmp_pag = df_pag.copy()
-                        tmp_pag[email_col] = tmp_pag[email_col].astype(str).str.strip().str.lower()
-                        df_pag_hist = tmp_pag[tmp_pag[email_col] == email_pag].copy()
-                    ultimo_pag = "-"
-                    valor_pag = "-"
-                    chave_pix = "-"
-                    if not df_pag_hist.empty:
-                        data_col = _coluna_data_pagamento(df_pag_hist)
-                        if data_col:
-                            df_pag_hist['_data_dt'] = parse_data_br(df_pag_hist[data_col])
-                            df_pag_hist = df_pag_hist.sort_values('_data_dt')
-                        ult = df_pag_hist.iloc[-1]
-                        ultimo_pag = str(_valor_linha(ult, ['data_pagamento', 'data'], '-'))
-                        valor_pag = str(_valor_linha(ult, ['valor'], '-'))
-                        chave_pix = str(_valor_linha(ult, ['chave_pix'], '-'))
-                    linhas_pag.append({
-                        'Aluno': nome_aluno,
-                        'E-mail': email_pag,
-                        'Vencimento': info_pag['vencimento'].strftime('%d/%m/%Y') if info_pag['vencimento'] else '-',
-                        'Dias': info_pag['dias'] if info_pag['dias'] is not None else '-',
-                        'Status': info_pag['status'],
-                        'Pago': 'Sim' if info_pag['pago'] else 'Não',
-                        'Último pagamento': ultimo_pag,
-                        'Valor': valor_pag,
-                        'Chave Pix': chave_pix,
-                    })
-                df_alertas_pag = pd.DataFrame(linhas_pag)
-                if df_alertas_pag.empty:
-                    st.info('Nenhum aluno para acompanhar pagamentos.')
-                else:
-                    df_alertas_pag['_dias_ordem'] = pd.to_numeric(df_alertas_pag['Dias'], errors='coerce')
-                    df_nao_pagos = df_alertas_pag[df_alertas_pag['Pago'] == 'Não'].copy()
-                    df_alerta = df_nao_pagos[df_nao_pagos['_dias_ordem'].notna() & (df_nao_pagos['_dias_ordem'] <= 5)].copy()
-                    if df_alerta.empty:
-                        st.success('Nenhum pagamento vencido ou próximo do vencimento nos próximos 5 dias.')
-                    else:
-                        st.warning(f'{len(df_alerta)} aluno(s) com pagamento vencido ou próximo do vencimento.')
-                        st.dataframe(df_alerta.sort_values('_dias_ordem').drop(columns=['_dias_ordem']), hide_index=True, use_container_width=True)
-                    with st.expander('Ver todos os pagamentos do mês'):
-                        st.dataframe(df_alertas_pag.sort_values(['Pago', '_dias_ordem']).drop(columns=['_dias_ordem']), hide_index=True, use_container_width=True)
-                st.caption('Estrutura usada: email_aluno, valor, vencimento, status, data_pagamento e chave_pix. O botão PAGO registra/atualiza o pagamento do aluno selecionado no mês da data informada.')
+                st.caption('O botão PAGO registra ou atualiza o pagamento do aluno selecionado no mês da data informada.')
             except Exception as e:
-                st.error(f'Erro alertas de pagamento: {e}')
+                st.error(f'Erro ao registrar pagamento: {e}')
 
     # ==========================================================
     # ÁREA DO ATLETA
