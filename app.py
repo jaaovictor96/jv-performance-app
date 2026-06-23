@@ -1015,6 +1015,20 @@ else:
                             </div>
                         """, unsafe_allow_html=True)
 
+                        carga_manual_key = f"carga_manual_{idx_atual}_{carga_atual:.1f}"
+                        carga_manual = st.number_input(
+                            "Carga atual (kg)",
+                            min_value=0.0,
+                            value=float(carga_atual),
+                            step=0.5,
+                            format="%.1f",
+                            key=carga_manual_key,
+                            help="Digite a carga manualmente ou use os botões abaixo para ajustar."
+                        )
+                        if float(carga_manual) != float(carga_atual):
+                            st.session_state.cargas_sessao[chave] = float(carga_manual)
+                            st.rerun()
+
                         c1, c2 = st.columns(2)
                         with c1:
                             if st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True):
