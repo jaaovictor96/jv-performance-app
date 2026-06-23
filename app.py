@@ -615,25 +615,6 @@ else:
             else:
                 st.sidebar.error("As senhas não coincidem.")
 
-    with st.sidebar.expander("📝 Check-in Quinzenal"):
-        with st.form("form_checkin", clear_on_submit=True):
-            st.markdown("##### Relatório de Evolução")
-            peso_atual = st.number_input("Peso Atual (kg)", min_value=30.0, step=0.1)
-            feedback = st.text_area("Como se sentiu (Fome, Sono, Treino)?")
-            if st.form_submit_button("ENVIAR PARA O COACH"):
-                try:
-                    try:
-                        df_ci = ler_sem_cache("checkins")
-                    except:
-                        df_ci = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
-                    novo = pd.DataFrame([{"data": datetime.now().strftime("%d/%m/%Y"),
-                                          "email": st.session_state.email,
-                                          "peso": peso_atual, "feedback": feedback}])
-                    conn.update(worksheet="checkins", data=pd.concat([df_ci, novo], ignore_index=True))
-                    st.sidebar.success("Check-in enviado! 🚀")
-                except Exception as e:
-                    st.sidebar.error(f"Erro: {e}")
-
     # ---- PAINEL DO COACH ----
     ativar_dashboard = False
     if st.session_state.email == EMAIL_COACH:
@@ -725,26 +706,8 @@ else:
             </div>
         """, unsafe_allow_html=True)
 
-        with st.expander("⚙️ Conta e check-in"):
-            tab_checkin, tab_senha, tab_sair = st.tabs(["Check-in", "Senha", "Sair"])
-            with tab_checkin:
-                with st.form("form_checkin_mobile", clear_on_submit=True):
-                    st.markdown("##### Relatório de Evolução")
-                    peso_atual_mobile = st.number_input("Peso Atual (kg)", min_value=30.0, step=0.1, key="peso_mobile")
-                    feedback_mobile = st.text_area("Como se sentiu (Fome, Sono, Treino)?", key="feedback_mobile")
-                    if st.form_submit_button("ENVIAR PARA O COACH", use_container_width=True):
-                        try:
-                            try:
-                                df_ci = ler_sem_cache("checkins")
-                            except:
-                                df_ci = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
-                            novo = pd.DataFrame([{"data": datetime.now().strftime("%d/%m/%Y"),
-                                                  "email": st.session_state.email,
-                                                  "peso": peso_atual_mobile, "feedback": feedback_mobile}])
-                            conn.update(worksheet="checkins", data=pd.concat([df_ci, novo], ignore_index=True))
-                            st.success("Check-in enviado! 🚀")
-                        except Exception as e:
-                            st.error(f"Erro: {e}")
+        with st.expander("⚙️ Configurações"):
+            tab_senha, tab_sair = st.tabs(["Senha", "Sair"])
             with tab_senha:
                 nova_senha_mobile = st.text_input("Nova Senha", type="password", key="new_pass_mobile")
                 confirma_senha_mobile = st.text_input("Confirme", type="password", key="conf_pass_mobile")
@@ -838,8 +801,11 @@ else:
         except:
             pass
 
-        # ---- ABAS: TREINO | MINHA EVOLUÇÃO ----
-        col_t, col_e = st.columns(2)
+        # ---- ABAS: TREINO | CHECK-IN ----
+        if st.session_state.aba_ativa not in ('treino', 'checkin'):
+            st.session_state.aba_ativa = 'treino'
+
+        col_t, col_c = st.columns(2)
         with col_t:
             is_treino = st.session_state.aba_ativa == 'treino'
             st.markdown(f'<div class="{"btn-primary" if is_treino else ""}">', unsafe_allow_html=True)
@@ -847,170 +813,42 @@ else:
                 st.session_state.aba_ativa = 'treino'
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
-        with col_e:
-            is_evolucao = st.session_state.aba_ativa == 'evolucao'
-            st.markdown(f'<div class="{"btn-primary" if is_evolucao else ""}">', unsafe_allow_html=True)
-            if st.button("📈 Minha Evolução", key="tab_evolucao", use_container_width=True):
-                st.session_state.aba_ativa = 'evolucao'
+        with col_c:
+            is_checkin = st.session_state.aba_ativa == 'checkin'
+            st.markdown(f'<div class="{"btn-primary" if is_checkin else ""}">', unsafe_allow_html=True)
+            if st.button("📝 Check-in", key="tab_checkin", use_container_width=True):
+                st.session_state.aba_ativa = 'checkin'
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown("---")
+        st.markdown('---')
 
         # ==========================================================
-        # ABA: MINHA EVOLUÇÃO
+        # ABA: CHECK-IN
         # ==========================================================
-        if st.session_state.aba_ativa == 'evolucao':
+        if st.session_state.aba_ativa == 'checkin':
             st.markdown(
                 "<h2 style='font-family:Space Grotesk;font-size:1.8rem;font-weight:900;line-height:1;margin-bottom:16px;'>"
-                "MINHA <span style='color:#F9C03D;'>EVOLUÇÃO</span></h2>",
+                "CHECK-<span style='color:#F9C03D;'>IN</span></h2>",
                 unsafe_allow_html=True
             )
-
-            meu_hist = historico_geral[historico_geral['email_aluno'] == st.session_state.email].copy() \
-                if not historico_geral.empty else pd.DataFrame()
-
-            if meu_hist.empty:
-                st.info("Nenhum treino registrado ainda. Complete seu primeiro treino para ver sua evolução aqui.")
-            else:
-                meu_hist['data'] = pd.to_datetime(meu_hist['data'], dayfirst=True)
-
-                # Recordes Pessoais
-                st.markdown(
-                    "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>🏆 Recordes Pessoais</p>",
-                    unsafe_allow_html=True
-                )
-                prs = meu_hist.groupby('exercicio').agg(
-                    carga_max=('carga', 'max'),
-                    ultima_data=('data', 'max')
-                ).reset_index().sort_values('carga_max', ascending=False)
-
-                pr_html = "<div style='background:rgba(28,27,27,0.9);border-radius:14px;overflow:hidden;margin-bottom:20px;'>"
-                for _, r in prs.iterrows():
-                    pr_html += f"""
-                        <div class='pr-row'>
-                            <div>
-                                <div class='pr-nome'>{r['exercicio']}</div>
-                                <div class='pr-data'>{r['ultima_data'].strftime('%d/%m/%Y')}</div>
-                            </div>
-                            <div class='pr-carga'>{r['carga_max']:.1f} kg</div>
-                        </div>"""
-                pr_html += "</div>"
-                st.markdown(pr_html, unsafe_allow_html=True)
-
-                # Calendário de treinos
-                st.markdown(
-                    "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📅 Calendário de Treinos</p>",
-                    unsafe_allow_html=True
-                )
-
-                # Navegação de mês
-                if 'cal_mes' not in st.session_state:
-                    st.session_state.cal_mes = datetime.now().replace(day=1)
-
-                col_prev, col_mes_label, col_next = st.columns([1, 3, 1])
-                with col_prev:
-                    if st.button("←", key="cal_prev", use_container_width=True):
-                        primeiro = st.session_state.cal_mes
-                        st.session_state.cal_mes = (primeiro - timedelta(days=1)).replace(day=1)
-                        st.rerun()
-                with col_mes_label:
-                    st.markdown(
-                        f"<p style='text-align:center;color:#ccc;font-family:Inter;font-size:13px;font-weight:600;letter-spacing:1px;margin:10px 0;'>"
-                        f"{st.session_state.cal_mes.strftime('%B %Y').upper()}</p>",
-                        unsafe_allow_html=True
-                    )
-                with col_next:
-                    hoje_dt = datetime.now().replace(day=1)
-                    if st.session_state.cal_mes < hoje_dt:
-                        if st.button("→", key="cal_next", use_container_width=True):
-                            ultimo_dia = (st.session_state.cal_mes.replace(day=28) + timedelta(days=4)).replace(day=1)
-                            st.session_state.cal_mes = ultimo_dia
-                            st.rerun()
-
-                # Monta dados do mês
-                mes_ref = st.session_state.cal_mes
-                ano, mes = mes_ref.year, mes_ref.month
-                primeiro_dia_semana = mes_ref.weekday()  # 0=segunda
-                import calendar as cal_lib
-                total_dias = cal_lib.monthrange(ano, mes)[1]
-
-                # Volume por dia no mês
-                meu_hist['data_date'] = meu_hist['data'].dt.date
-                vol_por_dia = {}
-                for _, row_h in meu_hist.iterrows():
-                    d = row_h['data_date']
-                    if d.year == ano and d.month == mes:
-                        vol = float(row_h.get('carga', 0))
-                        vol_por_dia[d.day] = vol_por_dia.get(d.day, 0) + vol
-
-                max_vol = max(vol_por_dia.values()) if vol_por_dia else 1
-
-                # HTML do calendário
-                dias_semana = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM']
-                cal_html = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;padding:16px;margin-bottom:20px;border:1px solid rgba(255,255,255,0.05);'>"
-                # Header dias da semana
-                cal_html += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:8px;'>"
-                for d in dias_semana:
-                    cal_html += f"<div style='text-align:center;color:#333;font-family:Inter;font-size:9px;letter-spacing:1px;font-weight:600;'>{d}</div>"
-                cal_html += "</div>"
-                # Grid de dias
-                cal_html += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;'>"
-                # Células vazias antes do dia 1
-                for _ in range(primeiro_dia_semana):
-                    cal_html += "<div></div>"
-                hoje_date = datetime.now().date()
-                for dia in range(1, total_dias + 1):
-                    data_dia = datetime(ano, mes, dia).date()
-                    vol = vol_por_dia.get(dia, 0)
-                    is_hoje = data_dia == hoje_date
-                    if vol > 0:
-                        intensidade = vol / max_vol
-                        opacity = 0.3 + 0.7 * intensidade
-                        bg = f"rgba(249,192,61,{opacity:.2f})"
-                        cor_txt = "#0A0A0A" if intensidade > 0.5 else "#F9C03D"
-                        borda = "1px solid rgba(249,192,61,0.5)"
-                    else:
-                        bg = "rgba(255,255,255,0.03)"
-                        cor_txt = "#333"
-                        borda = "1px solid rgba(255,255,255,0.04)"
-                    anel = "box-shadow:0 0 0 2px #F9C03D;" if is_hoje else ""
-                    cal_html += (
-                        f"<div style='aspect-ratio:1;display:flex;align-items:center;justify-content:center;"
-                        f"border-radius:8px;background:{bg};border:{borda};{anel}"
-                        f"font-family:Space Grotesk;font-size:11px;font-weight:700;color:{cor_txt};'>{dia}</div>"
-                    )
-                cal_html += "</div>"
-                # Legenda
-                cal_html += """
-                    <div style='display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.04);'>
-                        <div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,0.3);'></div>
-                        <span style='color:#444;font-family:Inter;font-size:9px;letter-spacing:1px;'>Volume baixo</span>
-                        <div style='width:10px;height:10px;border-radius:3px;background:rgba(249,192,61,1);margin-left:8px;'></div>
-                        <span style='color:#444;font-family:Inter;font-size:9px;letter-spacing:1px;'>Volume alto</span>
-                    </div>
-                """
-                cal_html += "</div>"
-                st.markdown(cal_html, unsafe_allow_html=True)
-
-                # Gráfico de progressão
-                st.markdown(
-                    "<p style='color:#F9C03D;font-family:Inter;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;'>📊 Progressão de Carga</p>",
-                    unsafe_allow_html=True
-                )
-                ex_sel = st.selectbox("Selecione o exercício:", meu_hist['exercicio'].unique().tolist(), key="ev_ex")
-                df_prog = meu_hist[meu_hist['exercicio'] == ex_sel].sort_values('data')
-                df_prog['data_display'] = df_prog['data'].dt.strftime('%d/%m/%Y')
-                fig = px.line(df_prog, x='data_display', y='carga', markers=True)
-                fig.update_traces(line_color='#F9C03D', marker=dict(color='#F9C03D', size=8))
-                fig.update_layout(
-                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    font_color="white", margin=dict(l=0, r=0, t=10, b=0),
-                    xaxis_title="", yaxis_title="kg", height=300
-                )
-                fig.update_xaxes(type='category', gridcolor='rgba(255,255,255,0.05)', nticks=5, tickangle=0)
-                fig.update_yaxes(gridcolor='rgba(255,255,255,0.05)')
-                st.plotly_chart(fig, use_container_width=True)
+            with st.form("form_checkin_main", clear_on_submit=True):
+                st.markdown("##### Relatório de Evolução")
+                peso_atual = st.number_input("Peso Atual (kg)", min_value=30.0, step=0.1, key="peso_checkin_main")
+                feedback = st.text_area("Como se sentiu (Fome, Sono, Treino)?", key="feedback_checkin_main")
+                if st.form_submit_button("ENVIAR PARA O COACH", use_container_width=True):
+                    try:
+                        try:
+                            df_ci = ler_sem_cache("checkins")
+                        except:
+                            df_ci = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
+                        novo = pd.DataFrame([{"data": datetime.now().strftime("%d/%m/%Y"),
+                                              "email": st.session_state.email,
+                                              "peso": peso_atual, "feedback": feedback}])
+                        conn.update(worksheet="checkins", data=pd.concat([df_ci, novo], ignore_index=True))
+                        st.success("Check-in enviado! 🚀")
+                    except Exception as e:
+                        st.error(f"Erro: {e}")
 
         # ==========================================================
         # ABA: TREINO
