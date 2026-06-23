@@ -627,15 +627,103 @@ else:
                     df_aluno = df_aluno.dropna(subset=['data'])
                     if df_aluno.empty:
                         st.info(f"{nome_sel} ainda não possui treinos com data válida.")
-                        st.stop()
-                    exercicio_sel = st.selectbox("Exercício:", df_aluno['exercicio'].unique())
-                    df_prog = df_aluno[df_aluno['exercicio'] == exercicio_sel].sort_values('data')
-                    df_prog['data_display'] = df_prog['data'].dt.strftime('%d/%m/%Y')
-                    fig = px.line(df_prog, x='data_display', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
-                    fig.update_traces(line_color='#F9C03D')
-                    fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
-                    fig.update_xaxes(type='category', title="Data do Treino")
-                    st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        df_aluno['data_dia'] = df_aluno['data'].dt.date
+                        df_aluno['data_display'] = df_aluno['data'].dt.strftime('%d/%m/%Y')
+
+                        st.markdown("### 📅 Calendário de Treinos")
+                        meses_disponiveis = sorted(df_aluno['data'].dt.to_period('M').unique(), reverse=True)
+                        mes_opcoes = {m.strftime('%m/%Y'): m for m in meses_disponiveis}
+                        mes_label = st.selectbox('Mês:', list(mes_opcoes.keys()), key=f'coach_mes_treino_{email_vinculado}')
+                        mes_ref = mes_opcoes[mes_label].to_timestamp()
+                        ano, mes = mes_ref.year, mes_ref.month
+                        primeiro_dia_semana = mes_ref.weekday()
+                        import calendar as cal_lib
+                        total_dias = cal_lib.monthrange(ano, mes)[1]
+                        treinos_por_dia = df_aluno.groupby('data_dia').size().to_dict()
+                        max_treinos = max(treinos_por_dia.values()) if treinos_por_dia else 1
+
+                        dias_semana = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM']
+                        cal_html = "<div style='background:rgba(18,17,17,0.95);border-radius:16px;padding:16px;margin-bottom:16px;border:1px solid rgba(255,255,255,0.05);'>"
+                        cal_html += "<div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:8px;'>"
+                        for d in dias_semana:
+                            cal_html += f"<div style='text-align:center;color:#555;font-family:Inter;font-size:9px;letter-spacing:1px;font-weight:600;'>{d}</div>"
+                        cal_html += "</div><div style='display:grid;grid-template-columns:repeat(7,1fr);gap:4px;'>"
+                        for _ in range(primeiro_dia_semana):
+                            cal_html += "<div></div>"
+                        for dia in range(1, total_dias + 1):
+                            data_dia = datetime(ano, mes, dia).date()
+                            qtd = treinos_por_dia.get(data_dia, 0)
+                            if qtd:
+                                intensidade = qtd / max_treinos
+                                opacity = 0.35 + 0.65 * intensidade
+                                bg = f"rgba(249,192,61,{opacity:.2f})"
+                                cor_txt = '#0A0A0A' if intensidade > 0.5 else '#F9C03D'
+                                borda = '1px solid rgba(249,192,61,0.55)'
+                            else:
+                                bg = 'rgba(255,255,255,0.03)'
+                                cor_txt = '#333'
+                                borda = '1px solid rgba(255,255,255,0.04)'
+                            cal_html += (
+                                f"<div title='{qtd} registros' style='aspect-ratio:1;display:flex;align-items:center;justify-content:center;"
+                                f"border-radius:8px;background:{bg};border:{borda};font-family:Space Grotesk;font-size:11px;font-weight:700;color:{cor_txt};'>{dia}</div>"
+                            )
+                        cal_html += "</div></div>"
+                        st.markdown(cal_html, unsafe_allow_html=True)
+
+                        dias_treinados = sorted(df_aluno['data_dia'].unique())
+                        dias_labels = [d.strftime('%d/%m/%Y') for d in dias_treinados]
+                        dia_label = st.select_slider('Dias com treino:', options=dias_labels, value=dias_labels[-1], key=f'coach_dia_treino_{email_vinculado}')
+                        dia_sel = datetime.strptime(dia_label, '%d/%m/%Y').date()
+                        df_dia = df_aluno[df_aluno['data_dia'] == dia_sel].copy()
+
+                        st.markdown(f"### 🧾 Treinos de {dia_label}")
+                        for treino_nome, df_treino_dia in df_dia.sort_values(['treino', 'exercicio']).groupby('treino'):
+                            with st.expander(f"{treino_nome} — {len(df_treino_dia)} exercícios", expanded=True):
+                                cols = [c for c in ['exercicio', 'carga', 'comentario'] if c in df_treino_dia.columns]
+                                st.dataframe(
+                                    df_treino_dia[cols].rename(columns={
+                                        'exercicio': 'Exercício',
+                                        'carga': 'Carga (kg)',
+                                        'comentario': 'Comentário'
+                                    }),
+                                    hide_index=True,
+                                    use_container_width=True
+                                )
+
+                        st.markdown("### 📋 Exercícios por Treino")
+                        try:
+                            df_protocolos = ler_sem_cache('planilha_treinos')
+                            df_protocolos['email_aluno'] = df_protocolos['email_aluno'].astype(str).str.strip().str.lower()
+                            df_protocolos = df_protocolos[df_protocolos['email_aluno'] == email_vinculado].copy()
+                            if df_protocolos.empty:
+                                st.info("Nenhum protocolo cadastrado para este aluno.")
+                            else:
+                                for treino_nome, df_treino in df_protocolos.groupby('treino_nome', sort=False):
+                                    with st.expander(f"{treino_nome} — protocolo", expanded=False):
+                                        cols = [c for c in ['exercicio', 'series', 'reps', 'video_url'] if c in df_treino.columns]
+                                        st.dataframe(
+                                            df_treino[cols].rename(columns={
+                                                'exercicio': 'Exercício',
+                                                'series': 'Séries',
+                                                'reps': 'Reps',
+                                                'video_url': 'Vídeo'
+                                            }),
+                                            hide_index=True,
+                                            use_container_width=True
+                                        )
+                        except Exception as e:
+                            st.warning(f"Não foi possível carregar a tabela de exercícios: {e}")
+
+                        st.markdown("### 📈 Progressão de Carga")
+                        exercicio_sel = st.selectbox('Exercício:', df_aluno['exercicio'].dropna().unique(), key=f'coach_exercicio_{email_vinculado}')
+                        df_prog = df_aluno[df_aluno['exercicio'] == exercicio_sel].sort_values('data')
+                        df_prog['data_display'] = df_prog['data'].dt.strftime('%d/%m/%Y')
+                        fig = px.line(df_prog, x='data_display', y='carga', title=f'Progressão: {exercicio_sel}', markers=True)
+                        fig.update_traces(line_color='#F9C03D')
+                        fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='white')
+                        fig.update_xaxes(type='category', title='Data do Treino')
+                        st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.info(f"{nome_sel} ainda não registrou treinos.")
 
@@ -668,6 +756,63 @@ else:
                     st.info("Aba de check-ins está vazia.")
             except Exception as e:
                 st.error(f"Erro check-ins: {e}")
+
+            st.divider()
+            st.markdown("### 💳 Pagamentos")
+            try:
+                try:
+                    df_pag = ler_sem_cache("pagamentos")
+                except:
+                    df_pag = pd.DataFrame(columns=["data", "email", "referencia", "valor", "status", "observacao"])
+                if not df_pag.empty and 'email' in df_pag.columns:
+                    df_pag['email'] = df_pag['email'].astype(str).str.strip().str.lower()
+                df_pag_aluno = df_pag[df_pag['email'] == email_vinculado].copy() if not df_pag.empty and 'email' in df_pag.columns else pd.DataFrame()
+
+                with st.form('form_pagamento_coach', clear_on_submit=True):
+                    col_data, col_ref = st.columns(2)
+                    with col_data:
+                        data_pag = st.date_input("Data", value=datetime.now().date(), key="pag_data")
+                    with col_ref:
+                        referencia_pag = st.text_input("Referência", placeholder="Ex.: Julho/2026", key="pag_ref")
+                    col_valor, col_status = st.columns(2)
+                    with col_valor:
+                        valor_pag = st.number_input("Valor (R$)", min_value=0.0, step=10.0, format="%.2f", key="pag_valor")
+                    with col_status:
+                        status_pag = st.selectbox("Status", ["Pago", "Pendente", "Atrasado", "Isento"], key="pag_status")
+                    obs_pag = st.text_area("Observação", key="pag_obs")
+                    if st.form_submit_button("REGISTRAR PAGAMENTO", use_container_width=True):
+                        novo_pag = pd.DataFrame([{
+                            "data": data_pag.strftime("%d/%m/%Y"),
+                            "email": email_vinculado,
+                            "referencia": referencia_pag,
+                            "valor": valor_pag,
+                            "status": status_pag,
+                            "observacao": obs_pag
+                        }])
+                        conn.update(worksheet="pagamentos", data=pd.concat([df_pag, novo_pag], ignore_index=True))
+                        st.success("Pagamento registrado!")
+                        st.cache_data.clear()
+                        st.rerun()
+
+                if df_pag_aluno.empty:
+                    st.info("Nenhum pagamento registrado para este aluno.")
+                else:
+                    df_pag_aluno['data_dt'] = pd.to_datetime(df_pag_aluno['data'], dayfirst=True, errors='coerce') if 'data' in df_pag_aluno.columns else pd.NaT
+                    df_pag_aluno = df_pag_aluno.sort_values('data_dt', ascending=False)
+                    cols_pag = [c for c in ['data', 'referencia', 'valor', 'status', 'observacao'] if c in df_pag_aluno.columns]
+                    st.dataframe(
+                        df_pag_aluno[cols_pag].rename(columns={
+                            'data': 'Data',
+                            'referencia': 'Referência',
+                            'valor': 'Valor (R$)',
+                            'status': 'Status',
+                            'observacao': 'Observação'
+                        }),
+                        hide_index=True,
+                        use_container_width=True
+                    )
+            except Exception as e:
+                st.error(f"Erro pagamentos: {e}")
 
     # ==========================================================
     # ÁREA DO ATLETA
@@ -1092,3 +1237,4 @@ else:
 
             except Exception as e:
                 st.error(f"Erro: {e}")
+
