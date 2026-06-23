@@ -72,6 +72,12 @@ def ler_sem_cache(worksheet: str):
 
 # --- 7. FUNÇÕES DE ENGAJAMENTO ---
 
+def parse_data_br(valores):
+    try:
+        return pd.to_datetime(valores, dayfirst=True, errors="coerce", format="mixed")
+    except TypeError:
+        return pd.to_datetime(valores, dayfirst=True, errors="coerce")
+
 def calcular_streak(historico: pd.DataFrame, email: str) -> int:
     if historico.empty:
         return 0
@@ -79,7 +85,7 @@ def calcular_streak(historico: pd.DataFrame, email: str) -> int:
     if df.empty:
         return 0
     try:
-        df['data_dt'] = pd.to_datetime(df['data'], dayfirst=True).dt.date
+        df['data_dt'] = parse_data_br(df['data']).dt.date
         dias = sorted(df['data_dt'].unique(), reverse=True)
         hoje = datetime.now().date()
         ontem = hoje - timedelta(days=1)
@@ -127,7 +133,7 @@ def volume_anterior(historico: pd.DataFrame, email: str, treino: str,
     if df.empty:
         return 0.0
     try:
-        df['data_dt'] = pd.to_datetime(df['data'], dayfirst=True)
+        df['data_dt'] = parse_data_br(df['data'])
         ultima_data = df['data_dt'].max()
         df_ult = df[df['data_dt'] == ultima_data]
         total = 0.0
@@ -168,7 +174,7 @@ def _data_vencimento_aluno(row):
             if texto.replace(".0", "").isdigit():
                 dia = int(float(texto))
             else:
-                data = pd.to_datetime(texto, dayfirst=True, errors="coerce")
+                data = parse_data_br(texto)
                 if pd.isna(data):
                     return None
                 data = data.date()
@@ -200,7 +206,7 @@ def _vencimento_por_pagamentos(email: str, pagamentos: pd.DataFrame):
         return None
     data_col = _coluna_data_pagamento(df)
     if data_col:
-        df["_data_dt"] = pd.to_datetime(df[data_col], dayfirst=True, errors="coerce")
+        df["_data_dt"] = parse_data_br(df[data_col])
         df = df.sort_values("_data_dt")
     ultimo = df.iloc[-1]
     valor = ultimo.get("vencimento", "")
@@ -213,7 +219,7 @@ def _vencimento_por_pagamentos(email: str, pagamentos: pd.DataFrame):
         ultimo_dia = cal_lib.monthrange(hoje.year, hoje.month)[1]
         return hoje.replace(day=max(1, min(dia, ultimo_dia)))
     except:
-        data = pd.to_datetime(valor, dayfirst=True, errors="coerce")
+        data = parse_data_br(valor)
         return None if pd.isna(data) else data.date()
 
 def _pagamento_mes_ok(email: str, vencimento, pagamentos: pd.DataFrame) -> bool:
@@ -244,7 +250,7 @@ def _pagamento_mes_ok(email: str, vencimento, pagamentos: pd.DataFrame) -> bool:
 
     data_col = _coluna_data_pagamento(df)
     if data_col:
-        datas = pd.to_datetime(df[data_col], dayfirst=True, errors="coerce")
+        datas = parse_data_br(df[data_col])
         if ((datas.dt.month == mes_ref) & (datas.dt.year == ano_ref)).any():
             return True
 
@@ -309,7 +315,7 @@ def registrar_pagamento_aluno(pagamentos: pd.DataFrame, aluno_row, data_pagament
     data_col = _coluna_data_pagamento(df) or "data_pagamento"
 
     df[email_col] = df[email_col].astype(str).str.strip().str.lower()
-    datas = pd.to_datetime(df[data_col], dayfirst=True, errors="coerce") if data_col in df.columns else pd.Series(pd.NaT, index=df.index)
+    datas = parse_data_br(df[data_col]) if data_col in df.columns else pd.Series(pd.NaT, index=df.index)
     mesmo_aluno = df[email_col] == email
     mesmo_mes = (datas.dt.month == data_pagamento.month) & (datas.dt.year == data_pagamento.year)
     mask = mesmo_aluno & mesmo_mes
@@ -802,7 +808,7 @@ else:
     # DASHBOARD DO COACH
     # ==========================================================
     if ativar_dashboard:
-        st.markdown("<h2 style='font-family:Space Grotesk;color:#F9C03D;'>ANÁLISE DE PERFORMANCE</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='font-family:Space Grotesk;color:#F9C03D;margin-bottom:4px;'>PAINEL DO COACH</h2><p style='color:#777;font-family:Inter;font-size:12px;margin-top:0;'>Acompanhamento de treinos, check-ins e pagamentos</p>", unsafe_allow_html=True)
 
         df_usuarios = ler_sem_cache("usuarios")
         df_coach = ler_sem_cache("registros")
@@ -817,7 +823,7 @@ else:
             if not df_coach.empty and 'email_aluno' in df_coach.columns and 'data' in df_coach.columns:
                 registros_validos = df_coach.copy()
                 registros_validos['email_aluno'] = registros_validos['email_aluno'].astype(str).str.strip().str.lower()
-                registros_validos['data_dt'] = pd.to_datetime(registros_validos['data'], dayfirst=True, errors='coerce')
+                registros_validos['data_dt'] = parse_data_br(registros_validos['data'])
                 registros_validos = registros_validos.dropna(subset=['data_dt'])
                 registros_validos['data_dia'] = registros_validos['data_dt'].dt.date
 
@@ -868,6 +874,7 @@ else:
             if df_alunos_coach.empty:
                 st.info("Nenhum aluno cadastrado para acompanhamento.")
                 st.stop()
+            st.markdown("### 👤 Detalhe do Aluno")
             nome_sel = st.selectbox("Selecione o Aluno:", df_alunos_coach['nome'].dropna().unique().tolist())
             email_vinculado = df_alunos_coach[df_alunos_coach['nome'] == nome_sel]['email'].iloc[0]
 
@@ -875,13 +882,8 @@ else:
                 df_coach['email_aluno'] = df_coach['email_aluno'].astype(str).str.strip().str.lower()
                 df_aluno = df_coach[df_coach['email_aluno'] == email_vinculado].copy()
 
-                with st.expander("🔍 Debug (remova após confirmar)"):
-                    st.write(f"Email buscado: `{email_vinculado}`")
-                    st.write(f"Emails em registros: {df_coach['email_aluno'].unique().tolist()}")
-                    st.write(f"Linhas encontradas: {len(df_aluno)}")
-
                 if not df_aluno.empty:
-                    df_aluno['data'] = pd.to_datetime(df_aluno['data'], dayfirst=True, errors='coerce')
+                    df_aluno['data'] = parse_data_br(df_aluno['data'])
                     df_aluno = df_aluno.dropna(subset=['data'])
                     if df_aluno.empty:
                         st.info(f"{nome_sel} ainda não possui treinos com data válida.")
@@ -991,7 +993,7 @@ else:
                 df_ci = ler_sem_cache("checkins")
                 if not df_ci.empty:
                     df_ci['email'] = df_ci['email'].astype(str).str.strip().str.lower()
-                    df_ci['data'] = pd.to_datetime(df_ci['data'], dayfirst=True, errors='coerce')
+                    df_ci['data'] = parse_data_br(df_ci['data'])
                     df_ci = df_ci.dropna(subset=['data'])
                     df_f = df_ci[df_ci['email'] == email_vinculado].sort_values('data')
                     if not df_f.empty:
@@ -1051,7 +1053,7 @@ else:
                     if not df_pag_hist.empty:
                         data_col = _coluna_data_pagamento(df_pag_hist)
                         if data_col:
-                            df_pag_hist['_data_dt'] = pd.to_datetime(df_pag_hist[data_col], dayfirst=True, errors='coerce')
+                            df_pag_hist['_data_dt'] = parse_data_br(df_pag_hist[data_col])
                             df_pag_hist = df_pag_hist.sort_values('_data_dt')
                         ult = df_pag_hist.iloc[-1]
                         ultimo_pag = str(_valor_linha(ult, ['data_pagamento', 'data'], '-'))
@@ -1268,7 +1270,7 @@ else:
                         df_ci_peso['email'] = df_ci_peso['email'].astype(str).str.strip().str.lower()
                         meus_checkins = df_ci_peso[df_ci_peso['email'] == st.session_state.email.lower()].copy()
                         if not meus_checkins.empty:
-                            meus_checkins['data_dt'] = pd.to_datetime(meus_checkins['data'], dayfirst=True, errors='coerce')
+                            meus_checkins['data_dt'] = parse_data_br(meus_checkins['data'])
                             meus_checkins = meus_checkins.sort_values('data_dt')
                             ultimo_peso = float(meus_checkins.iloc[-1].get('peso', 0) or 0)
                 except:
@@ -1505,7 +1507,7 @@ else:
                                     lista = []
                                     for i, r in exercicios_df.iterrows():
                                         lista.append({
-                                            "data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                                            "data": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                                             "email_aluno": st.session_state.email,
                                             "treino": selecao_treino,
                                             "exercicio": r['exercicio'],
@@ -1537,5 +1539,6 @@ else:
 
             except Exception as e:
                 st.error(f"Erro: {e}")
+
 
 
