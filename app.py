@@ -1,7 +1,7 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import plotly.express as px
 import time
 import base64
@@ -157,37 +157,44 @@ def _valor_linha(row, candidatos, padrao=""):
                 return val
     return padrao
 
-def _data_vencimento_aluno(row):
+def _dia_vencimento_valor(valor):
+    if valor == "" or pd.isna(valor):
+        return None
+    try:
+        if isinstance(valor, (int, float)) and not pd.isna(valor):
+            return max(1, min(int(valor), 31))
+        texto = str(valor).strip()
+        if texto.replace(".0", "").isdigit():
+            return max(1, min(int(float(texto)), 31))
+        data = parse_data_br(texto)
+        if pd.isna(data):
+            return None
+        return max(1, min(data.date().day, 31))
+    except:
+        return None
+
+def _montar_vencimento_mensal(dia, ano=None, mes=None):
+    if not dia:
+        return None
     hoje = datetime.now().date()
+    ano = ano or hoje.year
+    mes = mes or hoje.month
+    import calendar as cal_lib
+    ultimo_dia = cal_lib.monthrange(ano, mes)[1]
+    return date(ano, mes, max(1, min(int(dia), ultimo_dia)))
+
+def _proximo_mes(data_ref):
+    ano = data_ref.year + (1 if data_ref.month == 12 else 0)
+    mes = 1 if data_ref.month == 12 else data_ref.month + 1
+    return ano, mes
+
+def _data_vencimento_aluno(row):
     valor = _valor_linha(row, [
         "data_vencimento", "vencimento", "vencimento_pagamento",
         "dia_vencimento", "dia_pagamento", "dia_pgto"
     ], "")
-    if valor == "":
-        return None
-
-    try:
-        if isinstance(valor, (int, float)) and not pd.isna(valor):
-            dia = int(valor)
-        else:
-            texto = str(valor).strip()
-            if texto.replace(".0", "").isdigit():
-                dia = int(float(texto))
-            else:
-                data = parse_data_br(texto)
-                if pd.isna(data):
-                    return None
-                data = data.date()
-                if data < hoje.replace(day=1):
-                    dia = data.day
-                else:
-                    return data
-
-        import calendar as cal_lib
-        ultimo_dia = cal_lib.monthrange(hoje.year, hoje.month)[1]
-        return hoje.replace(day=max(1, min(dia, ultimo_dia)))
-    except:
-        return None
+    dia = _dia_vencimento_valor(valor)
+    return _montar_vencimento_mensal(dia)
 
 def _coluna_email_pagamento(pagamentos: pd.DataFrame):
     return next((c for c in ["email_aluno", "email"] if c in pagamentos.columns), None)
@@ -209,18 +216,8 @@ def _vencimento_por_pagamentos(email: str, pagamentos: pd.DataFrame):
         df["_data_dt"] = parse_data_br(df[data_col])
         df = df.sort_values("_data_dt")
     ultimo = df.iloc[-1]
-    valor = ultimo.get("vencimento", "")
-    if pd.isna(valor) or str(valor).strip() == "":
-        return None
-    try:
-        dia = int(float(str(valor).strip()))
-        hoje = datetime.now().date()
-        import calendar as cal_lib
-        ultimo_dia = cal_lib.monthrange(hoje.year, hoje.month)[1]
-        return hoje.replace(day=max(1, min(dia, ultimo_dia)))
-    except:
-        data = parse_data_br(valor)
-        return None if pd.isna(data) else data.date()
+    dia = _dia_vencimento_valor(ultimo.get("vencimento", ""))
+    return _montar_vencimento_mensal(dia)
 
 def _pagamento_mes_ok(email: str, vencimento, pagamentos: pd.DataFrame) -> bool:
     email_col = _coluna_email_pagamento(pagamentos)
@@ -273,11 +270,17 @@ def status_pagamento_aluno(row, pagamentos: pd.DataFrame) -> dict:
         }
 
     pago = _pagamento_mes_ok(email, vencimento, pagamentos)
-    dias = (vencimento - datetime.now().date()).days
     if pago:
-        status = "Pago"
+        prox_ano, prox_mes = _proximo_mes(vencimento)
+        vencimento_exibido = _montar_vencimento_mensal(vencimento.day, prox_ano, prox_mes)
+    else:
+        vencimento_exibido = vencimento
+
+    dias = (vencimento_exibido - datetime.now().date()).days
+    if pago:
+        status = f"Em dia - próximo vencimento em {dias} dia(s)"
     elif dias < 0:
-        status = f"Atrasado há {abs(dias)} dia(s)"
+        status = f"Pagamento em atraso há {abs(dias)} dia(s)"
     elif dias == 0:
         status = "Vence hoje"
     else:
@@ -285,7 +288,7 @@ def status_pagamento_aluno(row, pagamentos: pd.DataFrame) -> dict:
 
     return {
         "email": email,
-        "vencimento": vencimento,
+        "vencimento": vencimento_exibido,
         "dias": dias,
         "pago": pago,
         "status": status,
@@ -309,8 +312,8 @@ def registrar_pagamento_aluno(pagamentos: pd.DataFrame, aluno_row, data_pagament
             df[col] = ""
 
     email = str(_valor_linha(aluno_row, ["email"], "")).strip().lower()
-    vencimento_info = status_pagamento_aluno(aluno_row, df).get("vencimento")
-    vencimento_dia = vencimento_info.day if vencimento_info else _valor_linha(aluno_row, ["vencimento", "dia_vencimento"], "")
+    vencimento_base = _data_vencimento_aluno(aluno_row) or _vencimento_por_pagamentos(email, df)
+    vencimento_dia = vencimento_base.day if vencimento_base else _valor_linha(aluno_row, ["vencimento", "dia_vencimento"], "")
     email_col = _coluna_email_pagamento(df) or "email_aluno"
     data_col = _coluna_data_pagamento(df) or "data_pagamento"
 
@@ -877,19 +880,19 @@ else:
                     vencimento_pag = info_pag['vencimento']
                     dias_pag = info_pag['dias']
                     if info_pag['pago']:
-                        status_pag = '🟢 Pago'
+                        status_pag = f"🟢 {info_pag['status']}"
                         ordem_pag = 3
                     elif dias_pag is None:
                         status_pag = '⚪ Sem vencimento cadastrado'
                         ordem_pag = 4
                     elif dias_pag < 0:
-                        status_pag = f'🔴 Vencido há {abs(dias_pag)} dia(s)'
+                        status_pag = f"🔴 {info_pag['status']}"
                         ordem_pag = 1
                     elif dias_pag <= 5:
-                        status_pag = f'🟡 Vence em {dias_pag} dia(s)'
+                        status_pag = f"🟡 {info_pag['status']}"
                         ordem_pag = 2
                     else:
-                        status_pag = f'⚪ Em dia - vence em {dias_pag} dia(s)'
+                        status_pag = f"⚪ {info_pag['status']}"
                         ordem_pag = 3
                     linhas_pag_resumo.append({
                         'Aluno': nome_pag,
