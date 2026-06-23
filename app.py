@@ -302,6 +302,163 @@ def carregar_pagamentos_seguro() -> pd.DataFrame:
     except:
         return pd.DataFrame(columns=["email_aluno", "valor", "vencimento", "status", "data_pagamento", "chave_pix"])
 
+def _formatar_numero_br(valor, casas=1):
+    try:
+        return f"{float(valor):.{casas}f}".replace(".", ",")
+    except:
+        return "-"
+
+def _nome_mes_pt(mes):
+    nomes = {
+        1: "janeiro", 2: "fevereiro", 3: "março", 4: "abril",
+        5: "maio", 6: "junho", 7: "julho", 8: "agosto",
+        9: "setembro", 10: "outubro", 11: "novembro", 12: "dezembro"
+    }
+    return nomes.get(int(mes), "")
+
+def gerar_relatorio_mensal_html(nome_aluno, email_aluno, periodo_ref, df_treinos_mes, df_checkins_mes, observacoes=""):
+    periodo_txt = f"{_nome_mes_pt(periodo_ref.month).title()} de {periodo_ref.year}"
+    gerado_em = datetime.now().strftime("%d/%m/%Y às %H:%M")
+
+    if not df_treinos_mes.empty:
+        df_treinos_mes = df_treinos_mes.copy()
+        df_treinos_mes["data_dia"] = df_treinos_mes["data"].dt.date
+        dias_treinados = df_treinos_mes["data_dia"].nunique()
+        sessoes = df_treinos_mes.groupby(["data_dia", "treino"]).size().reset_index().shape[0] if "treino" in df_treinos_mes.columns else dias_treinados
+        total_exercicios = len(df_treinos_mes)
+        primeiro_treino = df_treinos_mes["data"].min().strftime("%d/%m/%Y")
+        ultimo_treino = df_treinos_mes["data"].max().strftime("%d/%m/%Y")
+    else:
+        dias_treinados = 0
+        sessoes = 0
+        total_exercicios = 0
+        primeiro_treino = "-"
+        ultimo_treino = "-"
+
+    peso_inicio = peso_fim = variacao_peso = "-"
+    feedback_final = "Nenhum check-in registrado no mês."
+    if not df_checkins_mes.empty:
+        df_checkins_mes = df_checkins_mes.sort_values("data").copy()
+        if "peso" in df_checkins_mes.columns:
+            pesos = pd.to_numeric(df_checkins_mes["peso"], errors="coerce").dropna()
+            if not pesos.empty:
+                peso_inicio_val = pesos.iloc[0]
+                peso_fim_val = pesos.iloc[-1]
+                variacao_val = peso_fim_val - peso_inicio_val
+                peso_inicio = f"{_formatar_numero_br(peso_inicio_val)} kg"
+                peso_fim = f"{_formatar_numero_br(peso_fim_val)} kg"
+                sinal = "+" if variacao_val > 0 else ""
+                variacao_peso = f"{sinal}{_formatar_numero_br(variacao_val)} kg"
+        if "feedback" in df_checkins_mes.columns:
+            feedbacks = df_checkins_mes["feedback"].dropna().astype(str).str.strip()
+            feedbacks = feedbacks[feedbacks != ""]
+            if not feedbacks.empty:
+                feedback_final = html.escape(feedbacks.iloc[-1])
+
+    linhas_treinos = ""
+    if not df_treinos_mes.empty and "treino" in df_treinos_mes.columns:
+        resumo_treinos = df_treinos_mes.groupby("treino").agg(
+            dias=("data_dia", "nunique"),
+            registros=("treino", "size")
+        ).reset_index().sort_values(["dias", "registros"], ascending=False)
+        for _, row in resumo_treinos.iterrows():
+            linhas_treinos += f"<tr><td>{html.escape(str(row['treino']))}</td><td>{int(row['dias'])}</td><td>{int(row['registros'])}</td></tr>"
+    if not linhas_treinos:
+        linhas_treinos = "<tr><td colspan='3'>Sem treinos registrados no mês.</td></tr>"
+
+    linhas_progressao = ""
+    if not df_treinos_mes.empty and {"exercicio", "carga"}.issubset(df_treinos_mes.columns):
+        df_prog = df_treinos_mes.copy()
+        df_prog["carga"] = pd.to_numeric(df_prog["carga"], errors="coerce")
+        df_prog = df_prog.dropna(subset=["carga"]).sort_values("data")
+        itens = []
+        for exercicio, grupo in df_prog.groupby("exercicio"):
+            if grupo.empty:
+                continue
+            primeira = grupo.iloc[0]["carga"]
+            ultima = grupo.iloc[-1]["carga"]
+            delta = ultima - primeira
+            itens.append((str(exercicio), primeira, ultima, delta))
+        itens = sorted(itens, key=lambda x: abs(x[3]), reverse=True)[:8]
+        for exercicio, primeira, ultima, delta in itens:
+            sinal = "+" if delta > 0 else ""
+            linhas_progressao += (
+                f"<tr><td>{html.escape(exercicio)}</td>"
+                f"<td>{_formatar_numero_br(primeira)} kg</td>"
+                f"<td>{_formatar_numero_br(ultima)} kg</td>"
+                f"<td>{sinal}{_formatar_numero_br(delta)} kg</td></tr>"
+            )
+    if not linhas_progressao:
+        linhas_progressao = "<tr><td colspan='4'>Sem dados suficientes de carga para progressão.</td></tr>"
+
+    observacoes_html = html.escape(observacoes.strip()) if observacoes.strip() else "Sem observações adicionais neste mês."
+
+    return f"""<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Relatório mensal - {html.escape(nome_aluno)} - {periodo_txt}</title>
+<style>
+body {{ margin: 0; background: #0b0b0b; color: #f7f7f7; font-family: Arial, sans-serif; }}
+.page {{ max-width: 900px; margin: 0 auto; padding: 40px 28px; }}
+.brand {{ color: #f9c03d; font-weight: 800; letter-spacing: 2px; font-size: 14px; }}
+h1 {{ margin: 12px 0 4px; font-size: 34px; }}
+h2 {{ margin-top: 28px; color: #f9c03d; font-size: 18px; }}
+.muted {{ color: #a8a8a8; }}
+.grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 22px; }}
+.card {{ border: 1px solid #2a2a2a; background: #151515; border-radius: 8px; padding: 16px; }}
+.label {{ color: #9d9d9d; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }}
+.value {{ font-size: 24px; font-weight: 800; margin-top: 8px; }}
+table {{ width: 100%; border-collapse: collapse; margin-top: 10px; background: #121212; }}
+th, td {{ border-bottom: 1px solid #282828; text-align: left; padding: 10px; font-size: 14px; }}
+th {{ color: #f9c03d; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }}
+.note {{ white-space: pre-wrap; line-height: 1.6; background: #151515; border-left: 4px solid #f9c03d; padding: 16px; border-radius: 6px; }}
+.footer {{ margin-top: 36px; color: #777; font-size: 12px; }}
+@media print {{ body {{ background: white; color: #111; }} .card, table, .note {{ background: white; }} th, h2, .brand {{ color: #b98200; }} }}
+</style>
+</head>
+<body>
+<div class="page">
+<div class="brand">JV PERFORMANCE</div>
+<h1>Relatório mensal</h1>
+<div class="muted">{periodo_txt} • {html.escape(nome_aluno)} • {html.escape(email_aluno)}</div>
+
+<div class="grid">
+<div class="card"><div class="label">Dias treinados</div><div class="value">{dias_treinados}</div></div>
+<div class="card"><div class="label">Sessões</div><div class="value">{sessoes}</div></div>
+<div class="card"><div class="label">Exercícios registrados</div><div class="value">{total_exercicios}</div></div>
+<div class="card"><div class="label">Variação de peso</div><div class="value">{variacao_peso}</div></div>
+</div>
+
+<h2>Resumo do período</h2>
+<table>
+<tr><th>Primeiro treino</th><th>Último treino</th><th>Peso inicial</th><th>Peso final</th></tr>
+<tr><td>{primeiro_treino}</td><td>{ultimo_treino}</td><td>{peso_inicio}</td><td>{peso_fim}</td></tr>
+</table>
+
+<h2>Frequência por treino</h2>
+<table>
+<tr><th>Treino</th><th>Dias</th><th>Registros</th></tr>
+{linhas_treinos}
+</table>
+
+<h2>Progressão de carga</h2>
+<table>
+<tr><th>Exercício</th><th>Primeira carga</th><th>Última carga</th><th>Variação</th></tr>
+{linhas_progressao}
+</table>
+
+<h2>Último relato do aluno</h2>
+<div class="note">{feedback_final}</div>
+
+<h2>Observações do coach</h2>
+<div class="note">{observacoes_html}</div>
+
+<div class="footer">Relatório gerado em {gerado_em}. Dados obtidos a partir dos registros do app.</div>
+</div>
+</body>
+</html>"""
+
 def registrar_pagamento_aluno(pagamentos: pd.DataFrame, aluno_row, data_pagamento):
     df = pagamentos.copy()
     estrutura = ["email_aluno", "valor", "vencimento", "status", "data_pagamento", "chave_pix"]
@@ -939,9 +1096,55 @@ else:
                         df_aluno['data_dia'] = df_aluno['data'].dt.date
                         df_aluno['data_display'] = df_aluno['data'].dt.strftime('%d/%m/%Y')
 
-                        st.markdown("### 📅 Calendário de Treinos")
                         meses_disponiveis = sorted(df_aluno['data'].dt.to_period('M').unique(), reverse=True)
                         mes_opcoes = {m.strftime('%m/%Y'): m for m in meses_disponiveis}
+
+                        st.markdown("### 📄 Relatório Mensal")
+                        mes_relatorio_label = st.selectbox('Mês do relatório:', list(mes_opcoes.keys()), key=f'coach_mes_relatorio_{email_vinculado}')
+                        periodo_relatorio = mes_opcoes[mes_relatorio_label].to_timestamp()
+                        inicio_relatorio = periodo_relatorio
+                        fim_relatorio = periodo_relatorio + pd.DateOffset(months=1)
+                        df_relatorio_treinos = df_aluno[(df_aluno['data'] >= inicio_relatorio) & (df_aluno['data'] < fim_relatorio)].copy()
+                        try:
+                            df_ci_relatorio = ler_sem_cache("checkins")
+                            if not df_ci_relatorio.empty:
+                                df_ci_relatorio['email'] = df_ci_relatorio['email'].astype(str).str.strip().str.lower()
+                                df_ci_relatorio['data'] = parse_data_br(df_ci_relatorio['data'])
+                                df_ci_relatorio = df_ci_relatorio.dropna(subset=['data'])
+                                df_ci_relatorio = df_ci_relatorio[
+                                    (df_ci_relatorio['email'] == email_vinculado) &
+                                    (df_ci_relatorio['data'] >= inicio_relatorio) &
+                                    (df_ci_relatorio['data'] < fim_relatorio)
+                                ].copy()
+                            else:
+                                df_ci_relatorio = pd.DataFrame()
+                        except:
+                            df_ci_relatorio = pd.DataFrame()
+
+                        observacoes_relatorio = st.text_area(
+                            'Observações para o relatório:',
+                            placeholder='Ex.: evolução do mês, pontos de atenção, foco do próximo ciclo...',
+                            key=f'observacoes_relatorio_{email_vinculado}_{mes_relatorio_label}'
+                        )
+                        relatorio_html = gerar_relatorio_mensal_html(
+                            nome_sel,
+                            email_vinculado,
+                            periodo_relatorio,
+                            df_relatorio_treinos,
+                            df_ci_relatorio,
+                            observacoes_relatorio
+                        )
+                        nome_arquivo_relatorio = f"relatorio_{nome_sel.lower().replace(' ', '_')}_{mes_relatorio_label.replace('/', '-')}.html"
+                        st.download_button(
+                            'Baixar relatório mensal',
+                            data=relatorio_html.encode('utf-8'),
+                            file_name=nome_arquivo_relatorio,
+                            mime='text/html',
+                            use_container_width=True,
+                            key=f'download_relatorio_{email_vinculado}_{mes_relatorio_label}'
+                        )
+
+                        st.markdown("### 📅 Calendário de Treinos")
                         mes_label = st.selectbox('Mês:', list(mes_opcoes.keys()), key=f'coach_mes_treino_{email_vinculado}')
                         mes_ref = mes_opcoes[mes_label].to_timestamp()
                         ano, mes = mes_ref.year, mes_ref.month
