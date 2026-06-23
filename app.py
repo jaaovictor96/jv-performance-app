@@ -5,14 +5,30 @@ from datetime import datetime, timedelta
 import plotly.express as px
 import time
 import base64
-import extra_streamlit_components as stx
+try:
+    import extra_streamlit_components as stx
+except ModuleNotFoundError:
+    stx = None
 import html
 
 # --- 1. CONFIGURAÃ‡ÃƒO ---
 st.set_page_config(page_title="JV PERFORMANCE", page_icon="ðŸ’ª", layout="centered")
 
 # --- 2. COOKIE MANAGER ---
-cookie_manager = stx.CookieManager()
+class CookieManagerFallback:
+    def get(self, *args, **kwargs):
+        return None
+
+    def get_all(self):
+        return {}
+
+    def set(self, *args, **kwargs):
+        return None
+
+    def delete(self, *args, **kwargs):
+        return None
+
+cookie_manager = stx.CookieManager() if stx else CookieManagerFallback()
 
 # --- 3. INICIALIZAÃ‡ÃƒO DE ESTADO ---
 defaults = {
