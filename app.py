@@ -29,6 +29,25 @@ class CookieManagerFallback:
         return None
 
 cookie_manager = stx.CookieManager() if stx else CookieManagerFallback()
+LOGIN_COOKIE = "jv_ferreira_login"
+
+def salvar_login_persistente(email):
+    try:
+        cookie_manager.set(
+            cookie=LOGIN_COOKIE,
+            val=str(email).strip().lower(),
+            expires_at=datetime.now() + timedelta(days=90)
+        )
+    except Exception:
+        pass
+
+def limpar_login_persistente():
+    try:
+        todos_cookies = cookie_manager.get_all()
+        if LOGIN_COOKIE in todos_cookies:
+            cookie_manager.delete(LOGIN_COOKIE)
+    except Exception:
+        pass
 
 # --- 3. INICIALIZAÇÃO DE ESTADO ---
 defaults = {
@@ -42,10 +61,14 @@ for k, v in defaults.items():
 
 # --- 4. PERSISTÊNCIA POR COOKIE ---
 if not st.session_state.logado and not st.session_state.saindo:
-    token = cookie_manager.get(cookie="jv_ferreira_login")
+    try:
+        token = cookie_manager.get(cookie=LOGIN_COOKIE)
+    except Exception:
+        token = None
     if token:
         st.session_state.logado = True
-        st.session_state.email = token
+        st.session_state.email = str(token).strip().lower()
+        st.session_state.saindo = False
 
 # --- 5. LOGO ---
 def get_base64_image(image_path):
@@ -894,10 +917,11 @@ if not st.session_state.logado:
 
         st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
         if st.button("ACESSAR", use_container_width=True):
+            login_ok = False
             try:
                 try:
                     usuarios = conn.read(worksheet="usuarios")
-                except:
+                except Exception:
                     time.sleep(1)
                     usuarios = conn.read(worksheet="usuarios")
 
@@ -908,19 +932,14 @@ if not st.session_state.logado:
                     st.session_state.logado = True
                     st.session_state.email = email_input
                     st.session_state.saindo = False
-                    try:
-                        cookie_manager.set(
-                            cookie="jv_ferreira_login",
-                            val=email_input,
-                            expires_at=datetime.now() + timedelta(days=30)
-                        )
-                    except:
-                        pass
-                    st.rerun()
+                    salvar_login_persistente(email_input)
+                    login_ok = True
                 else:
                     st.error("Credenciais inválidas.")
-            except:
-                st.error("Instabilidade na rede. Tente novamente em 1 segundo.")
+            except Exception:
+                st.error("Não foi possível validar o login agora. Confira sua conexão e tente novamente.")
+            if login_ok:
+                st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -928,6 +947,8 @@ if not st.session_state.logado:
 # ÁREA LOGADA
 # ==========================================================
 else:
+    salvar_login_persistente(st.session_state.email)
+
     # ---- SIDEBAR ----
     st.sidebar.markdown(
         "<p style='color:#F9C03D;font-family:Space Grotesk;font-weight:900;font-size:1rem;letter-spacing:2px;text-transform:uppercase;'>JV Performance</p>",
@@ -940,14 +961,8 @@ else:
     st.sidebar.divider()
 
     if st.sidebar.button("↩ Sair", use_container_width=True):
-        # 1. Deleta o cookie
-        try:
-            todos_cookies = cookie_manager.get_all()
-            if "jv_ferreira_login" in todos_cookies:
-                cookie_manager.delete("jv_ferreira_login")
-        except:
-            pass
-        # 2. Reseta estado para defaults
+        limpar_login_persistente()
+        # Reseta estado para defaults
         for k, v in defaults.items():
             st.session_state[k] = v
         # 3. saindo=True DEPOIS do reset (impede cookie de relogar)
@@ -1353,12 +1368,7 @@ else:
             with tab_sair:
                 st.caption("Encerra sua sessão neste aparelho.")
                 if st.button("↩ Sair", key="btn_sair_mobile", use_container_width=True):
-                    try:
-                        todos_cookies = cookie_manager.get_all()
-                        if "jv_ferreira_login" in todos_cookies:
-                            cookie_manager.delete("jv_ferreira_login")
-                    except:
-                        pass
+                    limpar_login_persistente()
                     for k, v in defaults.items():
                         st.session_state[k] = v
                     st.session_state.saindo = True
