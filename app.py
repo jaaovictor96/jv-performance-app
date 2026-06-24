@@ -65,6 +65,13 @@ if not st.session_state.logado and not st.session_state.saindo:
         token = cookie_manager.get(cookie=LOGIN_COOKIE)
     except Exception:
         token = None
+    if not token and stx:
+        # Em alguns celulares o componente de cookie demora um ciclo para hidratar.
+        time.sleep(0.4)
+        try:
+            token = cookie_manager.get(cookie=LOGIN_COOKIE)
+        except Exception:
+            token = None
     if token:
         st.session_state.logado = True
         st.session_state.email = str(token).strip().lower()
@@ -933,6 +940,7 @@ if not st.session_state.logado:
                     st.session_state.email = email_input
                     st.session_state.saindo = False
                     salvar_login_persistente(email_input)
+                    time.sleep(0.8)
                     login_ok = True
                 else:
                     st.error("Credenciais inválidas.")
