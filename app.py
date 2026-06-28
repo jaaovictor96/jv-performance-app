@@ -497,7 +497,8 @@ def gerar_relatorio_mensal_html(nome_aluno, email_aluno, periodo_ref, df_treinos
             primeira = grupo.iloc[0]["carga"]
             ultima = grupo.iloc[-1]["carga"]
             delta = ultima - primeira
-            itens.append((str(exercicio), primeira, ultima, delta))
+            if abs(delta) > 0.0001:
+                itens.append((str(exercicio), primeira, ultima, delta))
         itens = sorted(itens, key=lambda x: abs(x[3]), reverse=True)[:8]
         for exercicio, primeira, ultima, delta in itens:
             sinal = "+" if delta > 0 else ""
@@ -508,7 +509,7 @@ def gerar_relatorio_mensal_html(nome_aluno, email_aluno, periodo_ref, df_treinos
                 f"<td>{sinal}{_formatar_numero_br(delta)} kg</td></tr>"
             )
     if not linhas_progressao:
-        linhas_progressao = "<tr><td colspan='4'>Sem dados suficientes de carga para progressão.</td></tr>"
+        linhas_progressao = "<tr><td colspan='4'>Nenhuma alteração de carga registrada no mês.</td></tr>"
 
     observacoes_html = html.escape(observacoes.strip()) if observacoes.strip() else "Feedback não informado."
 
@@ -561,7 +562,7 @@ th {{ color: #f9c03d; font-size: 12px; text-transform: uppercase; letter-spacing
 {linhas_treinos}
 </table>
 
-<h2>Progressão de carga</h2>
+<h2>Alterações de carga</h2>
 <table>
 <tr><th>Exercício</th><th>Primeira carga</th><th>Última carga</th><th>Variação</th></tr>
 {linhas_progressao}
