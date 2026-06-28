@@ -346,6 +346,95 @@ def _nome_mes_pt(mes):
     }
     return nomes.get(int(mes), "")
 
+def gerar_feedback_mensal(nome_aluno, periodo_ref, df_treinos_mes, df_checkins_mes):
+    primeiro_nome = str(nome_aluno).strip().split()[0] if str(nome_aluno).strip() else "Aluno"
+    periodo_txt = f"{_nome_mes_pt(periodo_ref.month)} de {periodo_ref.year}"
+    paragrafos = []
+
+    if df_treinos_mes.empty:
+        paragrafos.append(
+            f"{primeiro_nome}, não foram encontrados treinos registrados em {periodo_txt}. "
+            "Vamos revisar sua rotina e identificar o que dificultou a frequência para retomarmos com uma meta possível no próximo ciclo."
+        )
+    else:
+        df_t = df_treinos_mes.copy().sort_values("data")
+        df_t["data_dia"] = df_t["data"].dt.date
+        dias = int(df_t["data_dia"].nunique())
+        sessoes = int(df_t.groupby(["data_dia", "treino"]).ngroups) if "treino" in df_t.columns else dias
+
+        if sessoes >= 12:
+            leitura_frequencia = "uma frequência muito consistente"
+        elif sessoes >= 8:
+            leitura_frequencia = "uma boa base de consistência"
+        else:
+            leitura_frequencia = "um ponto de partida, com espaço para ganhar mais regularidade"
+        paragrafos.append(
+            f"{primeiro_nome}, em {periodo_txt} você realizou {sessoes} sessão(ões) em {dias} dia(s), "
+            f"o que representa {leitura_frequencia}."
+        )
+
+        if "treino" in df_t.columns:
+            distribuicao = df_t.groupby("treino")["data_dia"].nunique().sort_values(ascending=False)
+            if len(distribuicao) > 1:
+                mais_nome, mais_qtd = str(distribuicao.index[0]), int(distribuicao.iloc[0])
+                menos_nome, menos_qtd = str(distribuicao.index[-1]), int(distribuicao.iloc[-1])
+                if mais_qtd - menos_qtd >= 2:
+                    paragrafos.append(
+                        f"A distribuição ficou mais concentrada em {mais_nome} ({mais_qtd} sessão(ões)), "
+                        f"enquanto {menos_nome} apareceu {menos_qtd} vez(es). Se ambos fazem parte do protocolo atual, "
+                        "a prioridade será equilibrar melhor essa sequência antes de repetir o treino mais frequente."
+                    )
+
+        evolucoes = []
+        if {"exercicio", "carga"}.issubset(df_t.columns):
+            df_c = df_t.copy()
+            df_c["carga"] = pd.to_numeric(df_c["carga"], errors="coerce")
+            df_c = df_c.dropna(subset=["carga"]).sort_values("data")
+            for exercicio, grupo in df_c.groupby("exercicio"):
+                primeira = float(grupo.iloc[0]["carga"])
+                ultima = float(grupo.iloc[-1]["carga"])
+                if ultima > primeira:
+                    evolucoes.append((ultima - primeira, str(exercicio), primeira, ultima))
+        if evolucoes:
+            delta, exercicio, primeira, ultima = max(evolucoes, key=lambda item: item[0])
+            paragrafos.append(
+                f"O principal destaque de carga foi {exercicio}, evoluindo de {_formatar_numero_br(primeira)} kg "
+                f"para {_formatar_numero_br(ultima)} kg (+{_formatar_numero_br(delta)} kg). "
+                "Esse avanço é positivo desde que repetições, amplitude e controle do movimento tenham sido mantidos."
+            )
+        else:
+            paragrafos.append(
+                "As cargas permaneceram estáveis no período. Isso não significa ausência de progresso: "
+                "qualidade de execução, controle, amplitude e repetições também devem orientar o próximo aumento."
+            )
+
+    if df_checkins_mes.empty:
+        paragrafos.append(
+            "Não houve check-in no mês. Para tornar a próxima análise mais completa, registre peso e percepção de sono, "
+            "fome, recuperação e desempenho nas datas combinadas."
+        )
+    else:
+        qtd_checkins = len(df_checkins_mes)
+        trecho_peso = ""
+        if "peso" in df_checkins_mes.columns:
+            pesos = pd.to_numeric(df_checkins_mes.sort_values("data")["peso"], errors="coerce").dropna()
+            if len(pesos) >= 2:
+                variacao = float(pesos.iloc[-1] - pesos.iloc[0])
+                sinal = "+" if variacao > 0 else ""
+                trecho_peso = f", com variação de peso de {sinal}{_formatar_numero_br(variacao)} kg"
+        paragrafos.append(
+            f"Foram realizados {qtd_checkins} check-in(s){trecho_peso}. "
+            "Vamos continuar relacionando essas informações com desempenho, recuperação e objetivo atual."
+        )
+
+    if not df_treinos_mes.empty:
+        paragrafos.append(
+            "Para o próximo mês, o foco será manter maior regularidade, cumprir todos os blocos do protocolo "
+            "e progredir carga somente quando a execução permanecer sólida."
+        )
+
+    return "\n\n".join(paragrafos)
+
 def gerar_relatorio_mensal_html(nome_aluno, email_aluno, periodo_ref, df_treinos_mes, df_checkins_mes, observacoes=""):
     periodo_txt = f"{_nome_mes_pt(periodo_ref.month).title()} de {periodo_ref.year}"
     gerado_em = datetime.now().strftime("%d/%m/%Y às %H:%M")
@@ -421,7 +510,7 @@ def gerar_relatorio_mensal_html(nome_aluno, email_aluno, periodo_ref, df_treinos
     if not linhas_progressao:
         linhas_progressao = "<tr><td colspan='4'>Sem dados suficientes de carga para progressão.</td></tr>"
 
-    observacoes_html = html.escape(observacoes.strip()) if observacoes.strip() else "Sem observações adicionais neste mês."
+    observacoes_html = html.escape(observacoes.strip()) if observacoes.strip() else "Feedback não informado."
 
     return f"""<!doctype html>
 <html lang="pt-BR">
@@ -450,7 +539,7 @@ th {{ color: #f9c03d; font-size: 12px; text-transform: uppercase; letter-spacing
 <body>
 <div class="page">
 <div class="brand">JV PERFORMANCE</div>
-<h1>Relatório mensal</h1>
+<h1>Relatório de acompanhamento</h1>
 <div class="muted">{periodo_txt} • {html.escape(nome_aluno)} • {html.escape(email_aluno)}</div>
 
 <div class="grid">
@@ -481,7 +570,7 @@ th {{ color: #f9c03d; font-size: 12px; text-transform: uppercase; letter-spacing
 <h2>Último relato do aluno</h2>
 <div class="note">{feedback_final}</div>
 
-<h2>Observações do coach</h2>
+<h2>Feedback mensal do coach</h2>
 <div class="note">{observacoes_html}</div>
 
 <div class="footer">Relatório gerado em {gerado_em}. Dados obtidos a partir dos registros do app.</div>
@@ -1256,10 +1345,18 @@ else:
             except:
                 df_ci_relatorio = pd.DataFrame()
 
+            feedback_automatico = gerar_feedback_mensal(
+                nome_sel,
+                periodo_relatorio,
+                df_relatorio_treinos,
+                df_ci_relatorio
+            )
             observacoes_relatorio = st.text_area(
-                'Observações para o relatório:',
-                placeholder='Ex.: evolução do mês, pontos de atenção, foco do próximo ciclo...',
-                key=f'observacoes_relatorio_{email_vinculado}_{mes_relatorio_label}'
+                'Feedback mensal:',
+                value=feedback_automatico,
+                height=260,
+                help='O texto é gerado pelos dados do mês e pode ser revisado antes do download.',
+                key=f'feedback_relatorio_{email_vinculado}_{mes_relatorio_label}'
             )
             relatorio_html = gerar_relatorio_mensal_html(
                 nome_sel,
