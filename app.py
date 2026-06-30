@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, date
 import plotly.express as px
 import time
 import base64
+import json
 try:
     import extra_streamlit_components as stx
 except ModuleNotFoundError:
@@ -107,6 +108,44 @@ def parse_data_br(valores):
         return pd.to_datetime(valores, dayfirst=True, errors="coerce", format="mixed")
     except TypeError:
         return pd.to_datetime(valores, dayfirst=True, errors="coerce")
+
+RASCUNHO_TREINO_PARAM = "treino_em_andamento"
+
+def salvar_rascunho_treino(email, treino, indice, cargas, notas=""):
+    try:
+        payload = {
+            "email": str(email).strip().lower(),
+            "treino": str(treino),
+            "indice": int(indice),
+            "cargas": {str(k): float(v) for k, v in cargas.items()},
+            "notas": str(notas),
+        }
+        bruto = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        st.query_params[RASCUNHO_TREINO_PARAM] = base64.urlsafe_b64encode(bruto).decode("ascii").rstrip("=")
+    except Exception:
+        pass
+
+def carregar_rascunho_treino(email):
+    try:
+        token = st.query_params.get(RASCUNHO_TREINO_PARAM, "")
+        if isinstance(token, list):
+            token = token[0] if token else ""
+        if not token:
+            return None
+        token = str(token) + "=" * (-len(str(token)) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8"))
+        if str(payload.get("email", "")).strip().lower() != str(email).strip().lower():
+            return None
+        return payload
+    except Exception:
+        return None
+
+def limpar_rascunho_treino():
+    try:
+        if RASCUNHO_TREINO_PARAM in st.query_params:
+            del st.query_params[RASCUNHO_TREINO_PARAM]
+    except Exception:
+        pass
 
 def calcular_streak(historico: pd.DataFrame, email: str) -> int:
     if historico.empty:
@@ -1618,7 +1657,13 @@ else:
                     st.info("Nenhum protocolo ativo. Aguarde seu coach configurar seu treino.")
                 else:
                     treinos_disponiveis = meus_treinos['treino_nome'].unique()
-                    selecao_treino = st.selectbox("Selecione o treino:", treinos_disponiveis)
+                    rascunho_salvo = carregar_rascunho_treino(st.session_state.email)
+                    treino_rascunho = str(rascunho_salvo.get('treino', '')) if rascunho_salvo else ''
+                    indice_treino_padrao = list(treinos_disponiveis).index(treino_rascunho) if treino_rascunho in treinos_disponiveis else 0
+                    selecao_treino = st.selectbox("Selecione o treino:", treinos_disponiveis, index=indice_treino_padrao)
+
+                    exercicios_df = meus_treinos[meus_treinos['treino_nome'] == selecao_treino].reset_index(drop=True)
+                    total_ex = len(exercicios_df)
 
                     if 'treino_ativo' not in st.session_state or st.session_state.treino_ativo != selecao_treino:
                         st.session_state.treino_ativo = selecao_treino
@@ -1626,23 +1671,51 @@ else:
                         st.session_state.cargas_sessao = {}
                         st.session_state.treino_finalizado = False
                         st.session_state.notas_sessao = ""
+                        if rascunho_salvo and treino_rascunho == str(selecao_treino):
+                            st.session_state.ex_index = max(0, min(int(rascunho_salvo.get('indice', 0)), total_ex - 1))
+                            st.session_state.notas_sessao = str(rascunho_salvo.get('notas', ''))
+                            cargas_salvas = rascunho_salvo.get('cargas', {})
+                            for idx, row in exercicios_df.iterrows():
+                                nome_chave = str(row['exercicio']).strip().lower()
+                                if nome_chave in cargas_salvas:
+                                    st.session_state.cargas_sessao[f"carga_{idx}"] = float(cargas_salvas[nome_chave])
 
-                    exercicios_df = meus_treinos[meus_treinos['treino_nome'] == selecao_treino].reset_index(drop=True)
-                    total_ex = len(exercicios_df)
-
-                    # Pré-carrega cargas
+                    # Pré-carrega cargas históricas sem misturá-las com a carga editada hoje.
+                    cargas_historicas = {}
+                    historico_ordenado = historico_geral.copy()
+                    if not historico_ordenado.empty and 'data' in historico_ordenado.columns:
+                        historico_ordenado['_data_dt'] = parse_data_br(historico_ordenado['data'])
+                        historico_ordenado = historico_ordenado.sort_values('_data_dt')
                     for idx, row in exercicios_df.iterrows():
                         chave = f"carga_{idx}"
+                        carga_ant = 0.0
+                        if not historico_ordenado.empty:
+                            filtro = historico_ordenado[
+                                (historico_ordenado['email_aluno'] == st.session_state.email) &
+                                (historico_ordenado['exercicio'] == row['exercicio'])
+                            ]
+                            if not filtro.empty:
+                                carga_hist_valor = pd.to_numeric(filtro.iloc[-1]['carga'], errors='coerce')
+                                carga_ant = float(carga_hist_valor) if pd.notna(carga_hist_valor) else 0.0
+                        cargas_historicas[chave] = carga_ant
                         if chave not in st.session_state.cargas_sessao:
-                            carga_ant = 0.0
-                            if not historico_geral.empty:
-                                filtro = historico_geral[
-                                    (historico_geral['email_aluno'] == st.session_state.email) &
-                                    (historico_geral['exercicio'] == row['exercicio'])
-                                ]
-                                if not filtro.empty:
-                                    carga_ant = float(filtro.iloc[-1]['carga'])
                             st.session_state.cargas_sessao[chave] = carga_ant
+
+                    def persistir_treino_atual():
+                        cargas_por_exercicio = {
+                            str(r['exercicio']).strip().lower(): st.session_state.cargas_sessao.get(f"carga_{i}", 0)
+                            for i, r in exercicios_df.iterrows()
+                        }
+                        salvar_rascunho_treino(
+                            st.session_state.email,
+                            selecao_treino,
+                            st.session_state.ex_index,
+                            cargas_por_exercicio,
+                            st.session_state.notas_sessao
+                        )
+
+                    if not st.session_state.treino_finalizado:
+                        persistir_treino_atual()
 
                     # ---- TELA DE CONCLUSÃO ----
                     if st.session_state.treino_finalizado:
@@ -1718,6 +1791,7 @@ else:
                             st.session_state.cargas_sessao = {}
                             st.session_state.treino_finalizado = False
                             st.session_state.notas_sessao = ""
+                            limpar_rascunho_treino()
                             st.cache_data.clear()
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
@@ -1730,6 +1804,7 @@ else:
                         treino_nome_html = html.escape(str(selecao_treino))
                         chave = f"carga_{idx_atual}"
                         carga_atual = st.session_state.cargas_sessao[chave]
+                        ultima_carga_historica = cargas_historicas.get(chave, 0.0)
 
                         pct = int((idx_atual / total_ex) * 100)
                         st.markdown(f"""
@@ -1747,7 +1822,7 @@ else:
                                 <p class='ex-label'>{treino_nome_html}</p>
                                 <p class='ex-name'>{exercicio_nome_html}</p>
                                 <p class='ex-meta'>{series} SÉRIES × {reps} REPS</p>
-                                <p class='ex-pr'>Última carga: {carga_atual:.1f} kg</p>
+                                <p class='ex-pr'>Última carga: {ultima_carga_historica:.1f} kg</p>
                             </div>
                         """, unsafe_allow_html=True)
 
@@ -1770,26 +1845,31 @@ else:
                         )
                         if float(carga_manual) != float(carga_atual):
                             st.session_state.cargas_sessao[chave] = float(carga_manual)
+                            persistir_treino_atual()
                             st.rerun()
 
                         c1, c2 = st.columns(2)
                         with c1:
                             if st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True):
                                 st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 2.5)
+                                persistir_treino_atual()
                                 st.rerun()
                         with c2:
                             if st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True):
                                 st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 0.5)
+                                persistir_treino_atual()
                                 st.rerun()
 
                         c3, c4 = st.columns(2)
                         with c3:
                             if st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True):
                                 st.session_state.cargas_sessao[chave] = carga_atual + 0.5
+                                persistir_treino_atual()
                                 st.rerun()
                         with c4:
                             if st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True):
                                 st.session_state.cargas_sessao[chave] = carga_atual + 2.5
+                                persistir_treino_atual()
                                 st.rerun()
                         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1803,10 +1883,12 @@ else:
                                 key="notas_final"
                             )
                             st.session_state.notas_sessao = notas
+                            persistir_treino_atual()
                             col_ant, col_fin = st.columns(2)
                             with col_ant:
                                 if st.button("← Anterior", key="btn_ant_final", use_container_width=True):
                                     st.session_state.ex_index -= 1
+                                    persistir_treino_atual()
                                     st.rerun()
                             with col_fin:
                                 st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
@@ -1825,6 +1907,7 @@ else:
                                     existente = ler_sem_cache("registros")
                                     conn.update(worksheet="registros", data=pd.concat([existente, df_envio], ignore_index=True))
                                     st.cache_data.clear()
+                                    limpar_rascunho_treino()
                                     st.session_state.treino_finalizado = True
                                     st.rerun()
                                 st.markdown('</div>', unsafe_allow_html=True)
@@ -1834,6 +1917,7 @@ else:
                                 if idx_atual > 0:
                                     if st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True):
                                         st.session_state.ex_index -= 1
+                                        persistir_treino_atual()
                                         st.rerun()
                                 else:
                                     st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True, disabled=True)
@@ -1841,6 +1925,7 @@ else:
                                 st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
                                 if st.button("Próximo →", key=f"btn_prox_{idx_atual}", use_container_width=True):
                                     st.session_state.ex_index += 1
+                                    persistir_treino_atual()
                                     st.rerun()
                                 st.markdown('</div>', unsafe_allow_html=True)
 
