@@ -2092,15 +2092,63 @@ else:
                         with st.expander("⏱ Cronômetro de descanso"):
                             timer_id = f"timer_{idx_atual}"
                             st.components.v1.html(f"""
-                                <div style="font-family:Arial,sans-serif;background:#151515;border:1px solid #2a2a2a;border-radius:8px;padding:14px;color:#fff;text-align:center;">
-                                    <div id="{timer_id}_display" style="font-size:32px;font-weight:800;color:#f9c03d;margin-bottom:12px;">00:00</div>
-                                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;">
-                                        <button onclick="startTimer(30)" style="padding:10px 4px;">30s</button>
-                                        <button onclick="startTimer(60)" style="padding:10px 4px;">60s</button>
-                                        <button onclick="startTimer(90)" style="padding:10px 4px;">90s</button>
-                                        <button onclick="startTimer(120)" style="padding:10px 4px;">120s</button>
+                                <style>
+                                    * {{ box-sizing: border-box; }}
+                                    body {{ margin: 0; background: transparent; font-family: Inter, Arial, sans-serif; }}
+                                    .timer-card {{
+                                        background: #151515;
+                                        border: 1px solid rgba(255,255,255,.08);
+                                        border-radius: 8px;
+                                        padding: 14px;
+                                        color: #fff;
+                                        text-align: center;
+                                    }}
+                                    .timer-display {{
+                                        min-height: 40px;
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: center;
+                                        color: #f9c03d;
+                                        font-size: 32px;
+                                        font-weight: 800;
+                                        margin-bottom: 12px;
+                                    }}
+                                    .timer-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }}
+                                    .timer-btn {{
+                                        min-height: 42px;
+                                        border: 1px solid rgba(249,192,61,.42);
+                                        border-radius: 6px;
+                                        background: rgba(249,192,61,.06);
+                                        color: #f9c03d;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        cursor: pointer;
+                                        transition: background .15s ease, color .15s ease, transform .1s ease;
+                                    }}
+                                    .timer-btn:hover, .timer-btn:focus {{
+                                        background: #f9c03d;
+                                        color: #111;
+                                        outline: none;
+                                    }}
+                                    .timer-btn:active {{ transform: scale(.97); }}
+                                    .timer-stop {{
+                                        width: 100%;
+                                        margin-top: 8px;
+                                        border-color: rgba(255,255,255,.15);
+                                        background: #202020;
+                                        color: #ddd;
+                                    }}
+                                    .timer-stop:hover, .timer-stop:focus {{ background: #2b2b2b; color: #fff; }}
+                                </style>
+                                <div class="timer-card">
+                                    <div id="{timer_id}_display" class="timer-display">00:00</div>
+                                    <div class="timer-grid">
+                                        <button class="timer-btn" onclick="startTimer(30)">30s</button>
+                                        <button class="timer-btn" onclick="startTimer(60)">60s</button>
+                                        <button class="timer-btn" onclick="startTimer(90)">90s</button>
+                                        <button class="timer-btn" onclick="startTimer(120)">120s</button>
                                     </div>
-                                    <button onclick="stopTimer()" style="margin-top:8px;width:100%;padding:9px;">Parar</button>
+                                    <button class="timer-btn timer-stop" onclick="stopTimer()">Parar</button>
                                 </div>
                                 <script>
                                     let intervalId = null;
@@ -2118,6 +2166,8 @@ else:
                                     function startTimer(seconds) {{
                                         stopTimer();
                                         remaining = seconds;
+                                        display.style.fontSize = '32px';
+                                        display.style.color = '#f9c03d';
                                         renderTimer();
                                         intervalId = setInterval(() => {{
                                             remaining -= 1;
@@ -2125,7 +2175,8 @@ else:
                                             if (remaining <= 0) {{
                                                 stopTimer();
                                                 display.textContent = 'DESCANSO CONCLUÍDO';
-                                                display.style.fontSize = '18px';
+                                                display.style.fontSize = '16px';
+                                                display.style.color = '#7bd88f';
                                                 if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
                                             }}
                                         }}, 1000);
