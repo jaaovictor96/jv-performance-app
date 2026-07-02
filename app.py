@@ -53,8 +53,9 @@ def limpar_login_persistente():
 # --- 3. INICIALIZAÇÃO DE ESTADO ---
 defaults = {
     'logado': False, 'email': '', 'saindo': False,
-    'ex_index': 0, 'cargas_sessao': {}, 'treino_finalizado': False,
-    'notas_sessao': '', 'aba_ativa': 'treino'
+    'ex_index': 0, 'cargas_sessao': {}, 'reps_sessao': {},
+    'exercicios_concluidos': [], 'ultimo_salvamento_treino': '',
+    'treino_finalizado': False, 'notas_sessao': '', 'aba_ativa': 'treino'
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -111,15 +112,20 @@ def parse_data_br(valores):
 
 RASCUNHO_TREINO_PARAM = "treino_em_andamento"
 
-def salvar_rascunho_treino(email, treino, indice, cargas, notas=""):
+def salvar_rascunho_treino(email, treino, indice, cargas, repeticoes=None, concluidos=None, notas=""):
     try:
+        salvo_em = datetime.now().strftime("%H:%M")
         payload = {
             "email": str(email).strip().lower(),
             "treino": str(treino),
             "indice": int(indice),
             "cargas": {str(k): float(v) for k, v in cargas.items()},
+            "repeticoes": {str(k): int(v) for k, v in (repeticoes or {}).items()},
+            "concluidos": [int(i) for i in (concluidos or [])],
             "notas": str(notas),
+            "salvo_em": salvo_em,
         }
+        st.session_state.ultimo_salvamento_treino = salvo_em
         bruto = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         st.query_params[RASCUNHO_TREINO_PARAM] = base64.urlsafe_b64encode(bruto).decode("ascii").rstrip("=")
     except Exception:
@@ -1537,6 +1543,9 @@ else:
         """, unsafe_allow_html=True)
 
         # ---- ALERTA IN-APP: MENSAGEM DO COACH ----
+        def marcar_mensagem_como_lida(chave):
+            st.session_state[chave] = True
+
         try:
             df_u = ler_planilha("usuarios")
             df_u['email'] = df_u['email'].astype(str).str.strip().str.lower()
@@ -1562,18 +1571,14 @@ else:
                         """, unsafe_allow_html=True)
                         col_ok, _ = st.columns([1, 3])
                         with col_ok:
-                            if st.button("✓ Entendido", key="dismiss_msg", use_container_width=True):
-                                st.session_state[msg_key] = True
-                                st.rerun()
-                    else:
-                        # Versão compacta após leitura
-                        st.markdown(f"""
-                            <div class='coach-msg'>
-                                <div class='coach-msg-label'>📣 Coach</div>
-                                <div class='coach-msg-texto'>{msg_html}</div>
-                            </div>
-                        """, unsafe_allow_html=True)
-        except:
+                            st.button(
+                                "✓ Entendido",
+                                key=f"dismiss_msg_{msg_key}",
+                                use_container_width=True,
+                                on_click=marcar_mensagem_como_lida,
+                                args=(msg_key,)
+                            )
+        except Exception:
             pass
 
         # ---- ABAS: TREINO | CHECK-IN ----
@@ -1669,16 +1674,41 @@ else:
                         st.session_state.treino_ativo = selecao_treino
                         st.session_state.ex_index = 0
                         st.session_state.cargas_sessao = {}
+                        st.session_state.reps_sessao = {}
+                        st.session_state.exercicios_concluidos = []
+                        st.session_state.ultimo_salvamento_treino = ''
                         st.session_state.treino_finalizado = False
                         st.session_state.notas_sessao = ""
                         if rascunho_salvo and treino_rascunho == str(selecao_treino):
                             st.session_state.ex_index = max(0, min(int(rascunho_salvo.get('indice', 0)), total_ex - 1))
                             st.session_state.notas_sessao = str(rascunho_salvo.get('notas', ''))
+                            st.session_state.ultimo_salvamento_treino = str(rascunho_salvo.get('salvo_em', ''))
+                            st.session_state.exercicios_concluidos = [
+                                int(i) for i in rascunho_salvo.get('concluidos', [])
+                                if str(i).isdigit() and 0 <= int(i) < total_ex
+                            ]
                             cargas_salvas = rascunho_salvo.get('cargas', {})
+                            reps_salvas = rascunho_salvo.get('repeticoes', {})
                             for idx, row in exercicios_df.iterrows():
                                 nome_chave = str(row['exercicio']).strip().lower()
                                 if nome_chave in cargas_salvas:
                                     st.session_state.cargas_sessao[f"carga_{idx}"] = float(cargas_salvas[nome_chave])
+                                if nome_chave in reps_salvas:
+                                    st.session_state.reps_sessao[f"reps_{idx}"] = int(reps_salvas[nome_chave])
+
+                    if rascunho_salvo and treino_rascunho == str(selecao_treino):
+                        st.info(
+                            f"Treino em andamento retomado: {selecao_treino} · exercício "
+                            f"{st.session_state.ex_index + 1} de {total_ex}."
+                        )
+                        if st.button("Descartar treino em andamento", key="descartar_rascunho", use_container_width=True):
+                            limpar_rascunho_treino()
+                            st.session_state.treino_ativo = None
+                            st.session_state.cargas_sessao = {}
+                            st.session_state.reps_sessao = {}
+                            st.session_state.exercicios_concluidos = []
+                            st.session_state.ex_index = 0
+                            st.rerun()
 
                     # Pré-carrega cargas históricas sem misturá-las com a carga editada hoje.
                     cargas_historicas = {}
@@ -1700,10 +1730,18 @@ else:
                         cargas_historicas[chave] = carga_ant
                         if chave not in st.session_state.cargas_sessao:
                             st.session_state.cargas_sessao[chave] = carga_ant
+                        reps_chave = f"reps_{idx}"
+                        if reps_chave not in st.session_state.reps_sessao:
+                            reps_planejadas = pd.to_numeric(row.get('reps'), errors='coerce')
+                            st.session_state.reps_sessao[reps_chave] = int(reps_planejadas) if pd.notna(reps_planejadas) else 0
 
                     def persistir_treino_atual():
                         cargas_por_exercicio = {
                             str(r['exercicio']).strip().lower(): st.session_state.cargas_sessao.get(f"carga_{i}", 0)
+                            for i, r in exercicios_df.iterrows()
+                        }
+                        reps_por_exercicio = {
+                            str(r['exercicio']).strip().lower(): st.session_state.reps_sessao.get(f"reps_{i}", 0)
                             for i, r in exercicios_df.iterrows()
                         }
                         salvar_rascunho_treino(
@@ -1711,6 +1749,8 @@ else:
                             selecao_treino,
                             st.session_state.ex_index,
                             cargas_por_exercicio,
+                            reps_por_exercicio,
+                            st.session_state.exercicios_concluidos,
                             st.session_state.notas_sessao
                         )
 
@@ -1789,6 +1829,8 @@ else:
                         if st.button("+ Novo Treino", use_container_width=True):
                             st.session_state.ex_index = 0
                             st.session_state.cargas_sessao = {}
+                            st.session_state.reps_sessao = {}
+                            st.session_state.exercicios_concluidos = []
                             st.session_state.treino_finalizado = False
                             st.session_state.notas_sessao = ""
                             limpar_rascunho_treino()
@@ -1806,12 +1848,13 @@ else:
                         carga_atual = st.session_state.cargas_sessao[chave]
                         ultima_carga_historica = cargas_historicas.get(chave, 0.0)
 
-                        pct = int((idx_atual / total_ex) * 100)
+                        concluidos_unicos = sorted(set(st.session_state.exercicios_concluidos))
+                        pct = int((len(concluidos_unicos) / total_ex) * 100)
                         st.markdown(f"""
                             <div class='progress-bar-bg'>
                                 <div class='progress-bar-fill' style='width:{pct}%;'></div>
                             </div>
-                            <p class='progress-label'>Exercício {idx_atual + 1} de {total_ex}</p>
+                            <p class='progress-label'>Exercício {idx_atual + 1} de {total_ex} · {len(concluidos_unicos)} concluído(s)</p>
                         """, unsafe_allow_html=True)
 
                         series = int(float(row['series'])) if pd.notnull(row.get('series')) else 0
@@ -1847,6 +1890,23 @@ else:
                             st.session_state.cargas_sessao[chave] = float(carga_manual)
                             persistir_treino_atual()
                             st.rerun()
+
+                        reps_chave = f"reps_{idx_atual}"
+                        reps_atuais = int(st.session_state.reps_sessao.get(reps_chave, 0))
+                        reps_realizadas = st.number_input(
+                            "Repetições realizadas",
+                            min_value=0,
+                            value=reps_atuais,
+                            step=1,
+                            key=f"reps_realizadas_{idx_atual}_{reps_atuais}"
+                        )
+                        if int(reps_realizadas) != reps_atuais:
+                            st.session_state.reps_sessao[reps_chave] = int(reps_realizadas)
+                            persistir_treino_atual()
+                            st.rerun()
+
+                        if st.session_state.ultimo_salvamento_treino:
+                            st.caption(f"Treino salvo às {st.session_state.ultimo_salvamento_treino}")
 
                         c1, c2 = st.columns(2)
                         with c1:
@@ -1884,6 +1944,15 @@ else:
                             )
                             st.session_state.notas_sessao = notas
                             persistir_treino_atual()
+                            concluidos_ao_finalizar = set(st.session_state.exercicios_concluidos) | {idx_atual}
+                            pendentes = [i for i in range(total_ex) if i not in concluidos_ao_finalizar]
+                            confirmar_incompleto = True
+                            if pendentes:
+                                st.warning(f"Há {len(pendentes)} exercício(s) não concluído(s).")
+                                confirmar_incompleto = st.checkbox(
+                                    "Finalizar mesmo assim",
+                                    key="confirmar_treino_incompleto"
+                                )
                             col_ant, col_fin = st.columns(2)
                             with col_ant:
                                 if st.button("← Anterior", key="btn_ant_final", use_container_width=True):
@@ -1892,7 +1961,14 @@ else:
                                     st.rerun()
                             with col_fin:
                                 st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-                                if st.button("FINALIZAR TREINO ✓", key="btn_finalizar", use_container_width=True):
+                                if st.button(
+                                    "FINALIZAR TREINO ✓",
+                                    key="btn_finalizar",
+                                    use_container_width=True,
+                                    disabled=not confirmar_incompleto
+                                ):
+                                    if idx_atual not in st.session_state.exercicios_concluidos:
+                                        st.session_state.exercicios_concluidos.append(idx_atual)
                                     lista = []
                                     for i, r in exercicios_df.iterrows():
                                         lista.append({
@@ -1901,6 +1977,7 @@ else:
                                             "treino": selecao_treino,
                                             "exercicio": r['exercicio'],
                                             "carga": st.session_state.cargas_sessao.get(f"carga_{i}", 0),
+                                            "reps_realizadas": st.session_state.reps_sessao.get(f"reps_{i}", 0),
                                             "comentario": st.session_state.notas_sessao
                                         })
                                     df_envio = pd.DataFrame(lista)
@@ -1923,7 +2000,9 @@ else:
                                     st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True, disabled=True)
                             with col_prox:
                                 st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-                                if st.button("Próximo →", key=f"btn_prox_{idx_atual}", use_container_width=True):
+                                if st.button("Concluir exercício →", key=f"btn_prox_{idx_atual}", use_container_width=True):
+                                    if idx_atual not in st.session_state.exercicios_concluidos:
+                                        st.session_state.exercicios_concluidos.append(idx_atual)
                                     st.session_state.ex_index += 1
                                     persistir_treino_atual()
                                     st.rerun()
