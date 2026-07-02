@@ -2,6 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime, timedelta, date
+from zoneinfo import ZoneInfo
 import plotly.express as px
 import time
 import base64
@@ -55,7 +56,8 @@ defaults = {
     'logado': False, 'email': '', 'saindo': False,
     'ex_index': 0, 'cargas_sessao': {}, 'reps_sessao': {},
     'exercicios_concluidos': [], 'ultimo_salvamento_treino': '',
-    'treino_finalizado': False, 'notas_sessao': '', 'aba_ativa': 'treino'
+    'rascunho_servidor_ok': None, 'treino_finalizado': False,
+    'notas_sessao': '', 'aba_ativa': 'treino'
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -111,10 +113,85 @@ def parse_data_br(valores):
         return pd.to_datetime(valores, dayfirst=True, errors="coerce")
 
 RASCUNHO_TREINO_PARAM = "treino_em_andamento"
+FUSO_BRASILIA = ZoneInfo("America/Sao_Paulo")
+COLUNAS_RASCUNHO = [
+    "email_aluno", "treino", "indice", "cargas_json",
+    "repeticoes_json", "concluidos_json", "notas", "atualizado_em"
+]
 
-def salvar_rascunho_treino(email, treino, indice, cargas, repeticoes=None, concluidos=None, notas=""):
+def agora_brasilia():
+    return datetime.now(FUSO_BRASILIA)
+
+def salvar_rascunho_servidor(payload):
     try:
-        salvo_em = datetime.now().strftime("%H:%M")
+        try:
+            df = ler_sem_cache("treinos_em_andamento")
+        except Exception:
+            df = pd.DataFrame(columns=COLUNAS_RASCUNHO)
+        for coluna in COLUNAS_RASCUNHO:
+            if coluna not in df.columns:
+                df[coluna] = ""
+        email = str(payload.get("email", "")).strip().lower()
+        if not df.empty:
+            df["email_aluno"] = df["email_aluno"].astype(str).str.strip().str.lower()
+            df = df[df["email_aluno"] != email].copy()
+        nova_linha = pd.DataFrame([{
+            "email_aluno": email,
+            "treino": payload.get("treino", ""),
+            "indice": payload.get("indice", 0),
+            "cargas_json": json.dumps(payload.get("cargas", {}), ensure_ascii=False),
+            "repeticoes_json": json.dumps(payload.get("repeticoes", {}), ensure_ascii=False),
+            "concluidos_json": json.dumps(payload.get("concluidos", [])),
+            "notas": payload.get("notas", ""),
+            "atualizado_em": payload.get("atualizado_em", ""),
+        }])
+        conn.update(
+            worksheet="treinos_em_andamento",
+            data=pd.concat([df[COLUNAS_RASCUNHO], nova_linha], ignore_index=True)
+        )
+        return True
+    except Exception:
+        return False
+
+def carregar_rascunho_servidor(email):
+    try:
+        df = ler_sem_cache("treinos_em_andamento")
+        if df.empty or "email_aluno" not in df.columns:
+            return None
+        df["email_aluno"] = df["email_aluno"].astype(str).str.strip().str.lower()
+        linha = df[df["email_aluno"] == str(email).strip().lower()]
+        if linha.empty:
+            return None
+        row = linha.iloc[-1]
+        atualizado = str(row.get("atualizado_em", ""))
+        return {
+            "email": str(email).strip().lower(),
+            "treino": str(row.get("treino", "")),
+            "indice": int(float(row.get("indice", 0) or 0)),
+            "cargas": json.loads(str(row.get("cargas_json", "{}") or "{}")),
+            "repeticoes": json.loads(str(row.get("repeticoes_json", "{}") or "{}")),
+            "concluidos": json.loads(str(row.get("concluidos_json", "[]") or "[]")),
+            "notas": str(row.get("notas", "")),
+            "salvo_em": atualizado[-5:] if atualizado else "",
+        }
+    except Exception:
+        return None
+
+def limpar_rascunho_servidor(email):
+    try:
+        df = ler_sem_cache("treinos_em_andamento")
+        if df.empty or "email_aluno" not in df.columns:
+            return
+        df["email_aluno"] = df["email_aluno"].astype(str).str.strip().str.lower()
+        df = df[df["email_aluno"] != str(email).strip().lower()].copy()
+        conn.update(worksheet="treinos_em_andamento", data=df[COLUNAS_RASCUNHO])
+    except Exception:
+        pass
+
+def salvar_rascunho_treino(email, treino, indice, cargas, repeticoes=None, concluidos=None, notas="", salvar_servidor=False):
+    try:
+        agora = agora_brasilia()
+        salvo_em = agora.strftime("%H:%M")
         payload = {
             "email": str(email).strip().lower(),
             "treino": str(treino),
@@ -124,10 +201,13 @@ def salvar_rascunho_treino(email, treino, indice, cargas, repeticoes=None, concl
             "concluidos": [int(i) for i in (concluidos or [])],
             "notas": str(notas),
             "salvo_em": salvo_em,
+            "atualizado_em": agora.strftime("%d/%m/%Y %H:%M"),
         }
         st.session_state.ultimo_salvamento_treino = salvo_em
         bruto = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         st.query_params[RASCUNHO_TREINO_PARAM] = base64.urlsafe_b64encode(bruto).decode("ascii").rstrip("=")
+        if salvar_servidor:
+            st.session_state.rascunho_servidor_ok = salvar_rascunho_servidor(payload)
     except Exception:
         pass
 
@@ -136,22 +216,23 @@ def carregar_rascunho_treino(email):
         token = st.query_params.get(RASCUNHO_TREINO_PARAM, "")
         if isinstance(token, list):
             token = token[0] if token else ""
-        if not token:
-            return None
-        token = str(token) + "=" * (-len(str(token)) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8"))
-        if str(payload.get("email", "")).strip().lower() != str(email).strip().lower():
-            return None
-        return payload
+        if token:
+            token = str(token) + "=" * (-len(str(token)) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8"))
+            if str(payload.get("email", "")).strip().lower() == str(email).strip().lower():
+                return payload
     except Exception:
-        return None
+        pass
+    return carregar_rascunho_servidor(email)
 
-def limpar_rascunho_treino():
+def limpar_rascunho_treino(email=None, limpar_servidor=False):
     try:
         if RASCUNHO_TREINO_PARAM in st.query_params:
             del st.query_params[RASCUNHO_TREINO_PARAM]
     except Exception:
         pass
+    if limpar_servidor and email:
+        limpar_rascunho_servidor(email)
 
 def calcular_streak(historico: pd.DataFrame, email: str) -> int:
     if historico.empty:
@@ -1153,6 +1234,24 @@ else:
                 ultima_data = hist_aluno['data_dia'].max() if not hist_aluno.empty else None
                 dias_sem = (hoje - ultima_data).days if ultima_data else None
                 treinou_hoje = ultima_data == hoje if ultima_data else False
+                try:
+                    meta_semanal = int(float(aluno.get('treinos_semanais', 0) or 0))
+                except Exception:
+                    meta_semanal = 0
+                inicio_semana = hoje - timedelta(days=hoje.weekday())
+                treinos_semana = (
+                    hist_aluno[hist_aluno['data_dia'] >= inicio_semana]['data_dia'].nunique()
+                    if not hist_aluno.empty else 0
+                )
+                if meta_semanal > 0:
+                    if treinos_semana >= meta_semanal:
+                        frequencia_semana = f'🟢 {treinos_semana}/{meta_semanal}'
+                    elif hoje.weekday() >= 4:
+                        frequencia_semana = f'🔴 {treinos_semana}/{meta_semanal}'
+                    else:
+                        frequencia_semana = f'🟡 {treinos_semana}/{meta_semanal}'
+                else:
+                    frequencia_semana = '-'
                 if treinou_hoje:
                     situacao = '🟢 Treinou hoje'
                     ordem_situacao = 1
@@ -1170,6 +1269,7 @@ else:
                     'Aluno': nome_aluno,
                     'Último treino': ultima_data.strftime('%d/%m/%Y') if ultima_data else '-',
                     'Situação': situacao,
+                    'Semana': frequencia_semana,
                     '_dias_ordem': dias_sem if dias_sem is not None else 9999,
                     '_ordem': ordem_situacao
                 })
@@ -1240,6 +1340,34 @@ else:
                 st.info('Selecione um aluno para visualizar calendário, protocolo, check-ins, relatório e pagamento.')
                 st.stop()
             email_vinculado = df_alunos_select[df_alunos_select['nome'] == nome_sel]['email'].iloc[0]
+
+            st.markdown("#### Meta de frequência")
+            linha_meta = df_alunos_select[df_alunos_select['email'] == email_vinculado].iloc[0]
+            try:
+                meta_atual = int(float(linha_meta.get('treinos_semanais', 0) or 0))
+            except Exception:
+                meta_atual = 0
+            col_meta, col_salvar_meta = st.columns([2, 1])
+            with col_meta:
+                nova_meta = st.number_input(
+                    "Treinos esperados por semana",
+                    min_value=0,
+                    max_value=7,
+                    value=meta_atual,
+                    step=1,
+                    key=f"meta_semanal_{email_vinculado}"
+                )
+            with col_salvar_meta:
+                st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                if st.button("Salvar meta", key=f"salvar_meta_{email_vinculado}", use_container_width=True):
+                    if 'treinos_semanais' not in df_usuarios.columns:
+                        df_usuarios['treinos_semanais'] = 0
+                    mask_meta = df_usuarios['email'].astype(str).str.strip().str.lower() == email_vinculado
+                    df_usuarios.loc[mask_meta, 'treinos_semanais'] = int(nova_meta)
+                    conn.update(worksheet='usuarios', data=df_usuarios)
+                    st.cache_data.clear()
+                    st.success("Meta semanal atualizada.")
+                    st.rerun()
 
             if not df_coach.empty and 'email_aluno' in df_coach.columns:
                 df_coach['email_aluno'] = df_coach['email_aluno'].astype(str).str.strip().str.lower()
@@ -1358,7 +1486,13 @@ else:
                                 "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
                                 "email": None,
                                 "peso": st.column_config.NumberColumn("Peso (kg)", format="%.1f"),
-                                "feedback": "Relato do Aluno"
+                                "sono_medio_horas": st.column_config.NumberColumn("Sono médio (h)", format="%.1f"),
+                                "periodo_cansaco": "Maior cansaço",
+                                "horario_maior_fome": "Horário de maior fome",
+                                "recuperacao_pos_treino": "Recuperação",
+                                "dor_desconforto": "Dor ou desconforto",
+                                "performance_semana": st.column_config.NumberColumn("Performance (0-10)"),
+                                "feedback": "Observações adicionais"
                             }, hide_index=True, use_container_width=True)
                     else:
                         st.info(f"Nenhum check-in para {nome_sel}.")
@@ -1624,22 +1758,63 @@ else:
                             meus_checkins['data_dt'] = parse_data_br(meus_checkins['data'])
                             meus_checkins = meus_checkins.sort_values('data_dt')
                             ultimo_peso = float(meus_checkins.iloc[-1].get('peso', 0) or 0)
-                except:
+                except Exception:
                     ultimo_peso = 0.0
+
                 peso_checkin_key = f"peso_checkin_main_{st.session_state.email}"
-                peso_atual = st.number_input("Peso Atual (kg)", min_value=0.0, value=float(ultimo_peso), step=0.1, key=peso_checkin_key)
-                feedback = st.text_area("Como se sentiu (Fome, Sono, Treino)?", key="feedback_checkin_main")
+                peso_atual = st.number_input(
+                    "Peso atual (kg)", min_value=0.0, value=float(ultimo_peso),
+                    step=0.1, key=peso_checkin_key
+                )
+                sono_medio = st.number_input(
+                    "Tempo médio de sono diário (horas)",
+                    min_value=0.0, max_value=24.0, value=7.0, step=0.5
+                )
+                periodo_cansaco = st.selectbox(
+                    "Em qual período você se sente mais cansado?",
+                    ["Manhã", "Tarde", "Noite", "Não percebo um período específico"]
+                )
+                horario_fome = st.selectbox(
+                    "Em qual horário você sente mais fome?",
+                    ["Ao acordar", "Durante a manhã", "No almoço", "Durante a tarde", "À noite", "Na madrugada"]
+                )
+                recuperacao = st.selectbox(
+                    "Como está sua recuperação após os treinos?",
+                    ["Muito boa", "Boa", "Regular", "Ruim", "Muito ruim"]
+                )
+                dor_desconforto = st.text_area(
+                    "Está sentindo alguma dor ou desconforto?",
+                    placeholder="Informe a região e quando sente. Caso não tenha, escreva 'Não'."
+                )
+                performance_semana = st.slider(
+                    "Nota para sua performance nesta semana",
+                    min_value=0, max_value=10, value=7
+                )
+                observacoes_checkin = st.text_area(
+                    "Observações adicionais (opcional)",
+                    placeholder="Algo importante sobre alimentação, rotina ou treino?"
+                )
+
                 if st.form_submit_button("ENVIAR PARA O COACH", use_container_width=True):
                     try:
                         try:
                             df_ci = ler_sem_cache("checkins")
-                        except:
-                            df_ci = pd.DataFrame(columns=["data", "email", "peso", "feedback"])
-                        novo = pd.DataFrame([{"data": datetime.now().strftime("%d/%m/%Y"),
-                                              "email": st.session_state.email,
-                                              "peso": peso_atual, "feedback": feedback}])
+                        except Exception:
+                            df_ci = pd.DataFrame()
+                        novo = pd.DataFrame([{
+                            "data": agora_brasilia().strftime("%d/%m/%Y"),
+                            "email": st.session_state.email,
+                            "peso": peso_atual,
+                            "sono_medio_horas": sono_medio,
+                            "periodo_cansaco": periodo_cansaco,
+                            "horario_maior_fome": horario_fome,
+                            "recuperacao_pos_treino": recuperacao,
+                            "dor_desconforto": dor_desconforto,
+                            "performance_semana": performance_semana,
+                            "feedback": observacoes_checkin,
+                        }])
                         conn.update(worksheet="checkins", data=pd.concat([df_ci, novo], ignore_index=True))
-                        st.success("Check-in enviado! 🚀")
+                        st.success("Check-in enviado!")
                     except Exception as e:
                         st.error(f"Erro: {e}")
 
@@ -1702,7 +1877,7 @@ else:
                             f"{st.session_state.ex_index + 1} de {total_ex}."
                         )
                         if st.button("Descartar treino em andamento", key="descartar_rascunho", use_container_width=True):
-                            limpar_rascunho_treino()
+                            limpar_rascunho_treino(st.session_state.email, limpar_servidor=True)
                             st.session_state.treino_ativo = None
                             st.session_state.cargas_sessao = {}
                             st.session_state.reps_sessao = {}
@@ -1735,7 +1910,7 @@ else:
                             reps_planejadas = pd.to_numeric(row.get('reps'), errors='coerce')
                             st.session_state.reps_sessao[reps_chave] = int(reps_planejadas) if pd.notna(reps_planejadas) else 0
 
-                    def persistir_treino_atual():
+                    def persistir_treino_atual(salvar_servidor=False):
                         cargas_por_exercicio = {
                             str(r['exercicio']).strip().lower(): st.session_state.cargas_sessao.get(f"carga_{i}", 0)
                             for i, r in exercicios_df.iterrows()
@@ -1751,7 +1926,8 @@ else:
                             cargas_por_exercicio,
                             reps_por_exercicio,
                             st.session_state.exercicios_concluidos,
-                            st.session_state.notas_sessao
+                            st.session_state.notas_sessao,
+                            salvar_servidor=salvar_servidor
                         )
 
                     if not st.session_state.treino_finalizado:
@@ -1833,7 +2009,7 @@ else:
                             st.session_state.exercicios_concluidos = []
                             st.session_state.treino_finalizado = False
                             st.session_state.notas_sessao = ""
-                            limpar_rascunho_treino()
+                            limpar_rascunho_treino(st.session_state.email, limpar_servidor=True)
                             st.cache_data.clear()
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
@@ -1888,7 +2064,7 @@ else:
                         )
                         if float(carga_manual) != float(carga_atual):
                             st.session_state.cargas_sessao[chave] = float(carga_manual)
-                            persistir_treino_atual()
+                            persistir_treino_atual(salvar_servidor=True)
                             st.rerun()
 
                         reps_chave = f"reps_{idx_atual}"
@@ -1902,34 +2078,83 @@ else:
                         )
                         if int(reps_realizadas) != reps_atuais:
                             st.session_state.reps_sessao[reps_chave] = int(reps_realizadas)
-                            persistir_treino_atual()
+                            persistir_treino_atual(salvar_servidor=True)
                             st.rerun()
 
                         if st.session_state.ultimo_salvamento_treino:
-                            st.caption(f"Treino salvo às {st.session_state.ultimo_salvamento_treino}")
+                            st.caption(f"Treino salvo às {st.session_state.ultimo_salvamento_treino} · horário de Brasília")
+                        if st.session_state.rascunho_servidor_ok is False:
+                            st.warning(
+                                "O treino está salvo neste aparelho, mas a aba 'treinos_em_andamento' "
+                                "ainda não está disponível na planilha."
+                            )
+
+                        with st.expander("⏱ Cronômetro de descanso"):
+                            timer_id = f"timer_{idx_atual}"
+                            st.components.v1.html(f"""
+                                <div style="font-family:Arial,sans-serif;background:#151515;border:1px solid #2a2a2a;border-radius:8px;padding:14px;color:#fff;text-align:center;">
+                                    <div id="{timer_id}_display" style="font-size:32px;font-weight:800;color:#f9c03d;margin-bottom:12px;">00:00</div>
+                                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;">
+                                        <button onclick="startTimer(30)" style="padding:10px 4px;">30s</button>
+                                        <button onclick="startTimer(60)" style="padding:10px 4px;">60s</button>
+                                        <button onclick="startTimer(90)" style="padding:10px 4px;">90s</button>
+                                        <button onclick="startTimer(120)" style="padding:10px 4px;">120s</button>
+                                    </div>
+                                    <button onclick="stopTimer()" style="margin-top:8px;width:100%;padding:9px;">Parar</button>
+                                </div>
+                                <script>
+                                    let intervalId = null;
+                                    let remaining = 0;
+                                    const display = document.getElementById('{timer_id}_display');
+                                    function renderTimer() {{
+                                        const min = String(Math.floor(remaining / 60)).padStart(2, '0');
+                                        const sec = String(remaining % 60).padStart(2, '0');
+                                        display.textContent = `${{min}}:${{sec}}`;
+                                    }}
+                                    function stopTimer() {{
+                                        if (intervalId) clearInterval(intervalId);
+                                        intervalId = null;
+                                    }}
+                                    function startTimer(seconds) {{
+                                        stopTimer();
+                                        remaining = seconds;
+                                        renderTimer();
+                                        intervalId = setInterval(() => {{
+                                            remaining -= 1;
+                                            renderTimer();
+                                            if (remaining <= 0) {{
+                                                stopTimer();
+                                                display.textContent = 'DESCANSO CONCLUÍDO';
+                                                display.style.fontSize = '18px';
+                                                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                                            }}
+                                        }}, 1000);
+                                    }}
+                                </script>
+                            """, height=165)
 
                         c1, c2 = st.columns(2)
                         with c1:
                             if st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True):
                                 st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 2.5)
-                                persistir_treino_atual()
+                                persistir_treino_atual(salvar_servidor=True)
                                 st.rerun()
                         with c2:
                             if st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True):
                                 st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 0.5)
-                                persistir_treino_atual()
+                                persistir_treino_atual(salvar_servidor=True)
                                 st.rerun()
 
                         c3, c4 = st.columns(2)
                         with c3:
                             if st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True):
                                 st.session_state.cargas_sessao[chave] = carga_atual + 0.5
-                                persistir_treino_atual()
+                                persistir_treino_atual(salvar_servidor=True)
                                 st.rerun()
                         with c4:
                             if st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True):
                                 st.session_state.cargas_sessao[chave] = carga_atual + 2.5
-                                persistir_treino_atual()
+                                persistir_treino_atual(salvar_servidor=True)
                                 st.rerun()
                         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1957,7 +2182,7 @@ else:
                             with col_ant:
                                 if st.button("← Anterior", key="btn_ant_final", use_container_width=True):
                                     st.session_state.ex_index -= 1
-                                    persistir_treino_atual()
+                                    persistir_treino_atual(salvar_servidor=True)
                                     st.rerun()
                             with col_fin:
                                 st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
@@ -1984,7 +2209,7 @@ else:
                                     existente = ler_sem_cache("registros")
                                     conn.update(worksheet="registros", data=pd.concat([existente, df_envio], ignore_index=True))
                                     st.cache_data.clear()
-                                    limpar_rascunho_treino()
+                                    limpar_rascunho_treino(st.session_state.email, limpar_servidor=True)
                                     st.session_state.treino_finalizado = True
                                     st.rerun()
                                 st.markdown('</div>', unsafe_allow_html=True)
@@ -1994,7 +2219,7 @@ else:
                                 if idx_atual > 0:
                                     if st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True):
                                         st.session_state.ex_index -= 1
-                                        persistir_treino_atual()
+                                        persistir_treino_atual(salvar_servidor=True)
                                         st.rerun()
                                 else:
                                     st.button("← Anterior", key=f"btn_ant_{idx_atual}", use_container_width=True, disabled=True)
@@ -2004,7 +2229,7 @@ else:
                                     if idx_atual not in st.session_state.exercicios_concluidos:
                                         st.session_state.exercicios_concluidos.append(idx_atual)
                                     st.session_state.ex_index += 1
-                                    persistir_treino_atual()
+                                    persistir_treino_atual(salvar_servidor=True)
                                     st.rerun()
                                 st.markdown('</div>', unsafe_allow_html=True)
 
