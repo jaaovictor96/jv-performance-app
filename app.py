@@ -884,6 +884,12 @@ st.markdown(f"""
         font-weight: 900; font-size: clamp(1.3rem, 5vw, 1.7rem);
         text-transform: uppercase; margin: 0 0 10px; line-height: 1.05; letter-spacing: -0.5px;
     }}
+    .ex-observacao {{
+        color: #C8C8C8; font-family: 'Inter', sans-serif;
+        font-size: 12px; line-height: 1.5; margin: 0 0 12px;
+        padding-left: 9px; border-left: 2px solid rgba(249,192,61,0.65);
+        overflow-wrap: anywhere;
+    }}
     .ex-meta {{
         color: #505050; font-family: 'Inter', sans-serif;
         font-size: 11px; margin: 0; letter-spacing: 1.5px; text-transform: uppercase;
@@ -2066,6 +2072,12 @@ else:
                         row = exercicios_df.iloc[idx_atual]
                         exercicio_nome_html = html.escape(str(row['exercicio']))
                         treino_nome_html = html.escape(str(selecao_treino))
+                        observacao_valor = row.get('observacoes', '')
+                        if pd.isna(observacao_valor) or str(observacao_valor).strip().lower() in ('', 'nan', 'none'):
+                            observacao_bloco = ''
+                        else:
+                            observacao_html = html.escape(str(observacao_valor).strip()).replace(chr(13) + chr(10), '<br>').replace(chr(10), '<br>')
+                            observacao_bloco = f"<p class='ex-observacao'>{observacao_html}</p>"
                         chave = f"carga_{idx_atual}"
                         carga_atual = st.session_state.cargas_sessao[chave]
                         ultima_carga_historica = cargas_historicas.get(chave, 0.0)
@@ -2086,6 +2098,7 @@ else:
                             <div class='ex-card'>
                                 <p class='ex-label'>{treino_nome_html}</p>
                                 <p class='ex-name'>{exercicio_nome_html}</p>
+                                {observacao_bloco}
                                 <p class='ex-meta'>{series} SÉRIES × {reps} REPS</p>
                                 <p class='ex-pr'>Última carga: {ultima_carga_historica:.1f} kg</p>
                             </div>
