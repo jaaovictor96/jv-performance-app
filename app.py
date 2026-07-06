@@ -1572,7 +1572,10 @@ else:
 
             st.divider()
             st.markdown('### 💳 Registrar Pagamento')
-            # A confirmação é exibida imediatamente após a gravação.
+            confirmacao_pagamento = st.session_state.pop('pagamento_confirmado', None)
+            if confirmacao_pagamento:
+                st.success(confirmacao_pagamento)
+                st.toast('Pagamento registrado com sucesso!', icon='✅')
             try:
                 df_pag = carregar_pagamentos_seguro()
                 linha_aluno_pag = df_alunos_coach[df_alunos_coach['email'] == email_vinculado].iloc[0]
@@ -1585,12 +1588,12 @@ else:
                     if st.button('PAGO', key=f'btn_pago_{email_vinculado}', use_container_width=True):
                         df_pag_atualizado = registrar_pagamento_aluno(df_pag, linha_aluno_pag, data_pago)
                         conn.update(worksheet='pagamentos', data=df_pag_atualizado)
-                        ler_planilha.clear()
-                        st.success(
+                        st.session_state.pagamento_confirmado = (
                             f'Pagamento de {nome_sel} registrado com sucesso em '
                             f'{data_pago.strftime("%d/%m/%Y")}.'
                         )
-                        st.toast('Pagamento registrado com sucesso!', icon='✅')
+                        ler_planilha.clear()
+                        st.rerun()
                     st.markdown('</div>', unsafe_allow_html=True)
 
                 st.caption('O botão PAGO registra ou atualiza o pagamento do aluno selecionado no mês da data informada.')
