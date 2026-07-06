@@ -2097,9 +2097,7 @@ else:
                         st.markdown(f"""
                             <div class='ex-card'>
                                 <p class='ex-label'>{treino_nome_html}</p>
-                                <p class='ex-name'>{exercicio_nome_html}</p>
-                                {observacao_bloco}
-                                <p class='ex-meta'>{series} SÉRIES × {reps} REPS</p>
+                                <p class='ex-name'>{exercicio_nome_html}</p>{observacao_bloco}<p class='ex-meta'>{series} SÉRIES × {reps} REPS</p>
                                 <p class='ex-pr'>Última carga: {ultima_carga_historica:.1f} kg</p>
                             </div>
                         """, unsafe_allow_html=True)
