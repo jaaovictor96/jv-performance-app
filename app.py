@@ -95,14 +95,19 @@ logo_url = f"data:image/jpeg;base64,{img_data}" if img_data else \
 
 # --- 6. CONFIGURAÇÃO ---
 EMAIL_COACH = "jaaovictor96@gmail.com"
-conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
+conn = st.connection("gsheets", type=GSheetsConnection, ttl=3600)
 
-@st.cache_data(ttl=30)
+def erro_quota_google(exc) -> bool:
+    mensagem = str(exc).lower()
+    return "429" in mensagem or "resource_exhausted" in mensagem or "quota exceeded" in mensagem
+
+@st.cache_data(ttl=60, show_spinner=False)
 def ler_planilha(worksheet: str):
-    return conn.read(worksheet=worksheet)
+    return conn.read(worksheet=worksheet, ttl=60)
 
 def ler_sem_cache(worksheet: str):
-    return conn.read(worksheet=worksheet, ttl=0)
+    # Mantido por compatibilidade: todas as seções compartilham a mesma leitura.
+    return ler_planilha(worksheet)
 
 # --- 7. FUNÇÕES DE ENGAJAMENTO ---
 
@@ -1209,8 +1214,17 @@ else:
     if ativar_dashboard:
         st.markdown("<h2 style='font-family:Space Grotesk;color:#F9C03D;margin-bottom:4px;'>PAINEL DO COACH</h2><p style='color:#777;font-family:Inter;font-size:12px;margin-top:0;'>Acompanhamento de treinos, check-ins e pagamentos</p>", unsafe_allow_html=True)
 
-        df_usuarios = ler_sem_cache("usuarios")
-        df_coach = ler_sem_cache("registros")
+        try:
+            df_usuarios = ler_sem_cache("usuarios")
+            df_coach = ler_sem_cache("registros")
+        except Exception as e:
+            if erro_quota_google(e):
+                st.warning(
+                    "O Google Sheets está processando muitas consultas neste momento. "
+                    "Aguarde cerca de 60 segundos antes de atualizar o painel."
+                )
+                st.stop()
+            raise
 
         if not df_usuarios.empty:
             df_usuarios['email'] = df_usuarios['email'].astype(str).str.strip().str.lower()
@@ -1365,7 +1379,7 @@ else:
                     mask_meta = df_usuarios['email'].astype(str).str.strip().str.lower() == email_vinculado
                     df_usuarios.loc[mask_meta, 'treinos_semanais'] = int(nova_meta)
                     conn.update(worksheet='usuarios', data=df_usuarios)
-                    st.cache_data.clear()
+                    ler_planilha.clear()
                     st.success("Meta semanal atualizada.")
                     st.rerun()
 
@@ -1558,6 +1572,7 @@ else:
 
             st.divider()
             st.markdown('### 💳 Registrar Pagamento')
+            # A confirmação é exibida imediatamente após a gravação.
             try:
                 df_pag = carregar_pagamentos_seguro()
                 linha_aluno_pag = df_alunos_coach[df_alunos_coach['email'] == email_vinculado].iloc[0]
@@ -1570,14 +1585,23 @@ else:
                     if st.button('PAGO', key=f'btn_pago_{email_vinculado}', use_container_width=True):
                         df_pag_atualizado = registrar_pagamento_aluno(df_pag, linha_aluno_pag, data_pago)
                         conn.update(worksheet='pagamentos', data=df_pag_atualizado)
-                        st.success(f'Pagamento de {nome_sel} marcado como pago em {data_pago.strftime("%d/%m/%Y")}.')
-                        st.cache_data.clear()
-                        st.rerun()
+                        ler_planilha.clear()
+                        st.success(
+                            f'Pagamento de {nome_sel} registrado com sucesso em '
+                            f'{data_pago.strftime("%d/%m/%Y")}.'
+                        )
+                        st.toast('Pagamento registrado com sucesso!', icon='✅')
                     st.markdown('</div>', unsafe_allow_html=True)
 
                 st.caption('O botão PAGO registra ou atualiza o pagamento do aluno selecionado no mês da data informada.')
             except Exception as e:
-                st.error(f'Erro ao registrar pagamento: {e}')
+                if erro_quota_google(e):
+                    st.warning(
+                        "O Google Sheets atingiu o limite temporário de leituras. Aguarde cerca de 60 segundos "
+                        "e atualize a página. Se você já clicou em PAGO, confira o status antes de clicar novamente."
+                    )
+                else:
+                    st.error(f'Erro ao registrar pagamento: {e}')
 
     # ==========================================================
     # ÁREA DO ATLETA
@@ -2010,7 +2034,7 @@ else:
                             st.session_state.treino_finalizado = False
                             st.session_state.notas_sessao = ""
                             limpar_rascunho_treino(st.session_state.email, limpar_servidor=True)
-                            st.cache_data.clear()
+                            ler_planilha.clear()
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2259,7 +2283,7 @@ else:
                                     df_envio = pd.DataFrame(lista)
                                     existente = ler_sem_cache("registros")
                                     conn.update(worksheet="registros", data=pd.concat([existente, df_envio], ignore_index=True))
-                                    st.cache_data.clear()
+                                    ler_planilha.clear()
                                     limpar_rascunho_treino(st.session_state.email, limpar_servidor=True)
                                     st.session_state.treino_finalizado = True
                                     st.rerun()
