@@ -103,7 +103,8 @@ def erro_quota_google(exc) -> bool:
 
 @st.cache_data(ttl=60, show_spinner=False)
 def ler_planilha(worksheet: str):
-    return conn.read(worksheet=worksheet, ttl=60)
+    # O cache é controlado apenas aqui. Após uma gravação, clear() força leitura nova.
+    return conn.read(worksheet=worksheet, ttl=0)
 
 def ler_sem_cache(worksheet: str):
     # Mantido por compatibilidade: todas as seções compartilham a mesma leitura.
@@ -1283,7 +1284,7 @@ else:
                     'Aluno': nome_aluno,
                     'Último treino': ultima_data.strftime('%d/%m/%Y') if ultima_data else '-',
                     'Situação': situacao,
-                    'Semana': frequencia_semana,
+                    'Meta semanal': frequencia_semana,
                     '_dias_ordem': dias_sem if dias_sem is not None else 9999,
                     '_ordem': ordem_situacao
                 })
@@ -1356,6 +1357,10 @@ else:
             email_vinculado = df_alunos_select[df_alunos_select['nome'] == nome_sel]['email'].iloc[0]
 
             st.markdown("#### Meta de frequência")
+            confirmacao_meta = st.session_state.pop('meta_semanal_confirmada', None)
+            if confirmacao_meta:
+                st.success(confirmacao_meta)
+                st.toast('Meta semanal salva!', icon='✅')
             linha_meta = df_alunos_select[df_alunos_select['email'] == email_vinculado].iloc[0]
             try:
                 meta_atual = int(float(linha_meta.get('treinos_semanais', 0) or 0))
@@ -1374,14 +1379,28 @@ else:
             with col_salvar_meta:
                 st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
                 if st.button("Salvar meta", key=f"salvar_meta_{email_vinculado}", use_container_width=True):
-                    if 'treinos_semanais' not in df_usuarios.columns:
-                        df_usuarios['treinos_semanais'] = 0
-                    mask_meta = df_usuarios['email'].astype(str).str.strip().str.lower() == email_vinculado
-                    df_usuarios.loc[mask_meta, 'treinos_semanais'] = int(nova_meta)
-                    conn.update(worksheet='usuarios', data=df_usuarios)
-                    ler_planilha.clear()
-                    st.success("Meta semanal atualizada.")
-                    st.rerun()
+                    try:
+                        df_usuarios_meta = df_usuarios.copy()
+                        if 'treinos_semanais' not in df_usuarios_meta.columns:
+                            df_usuarios_meta['treinos_semanais'] = 0
+                        mask_meta = (
+                            df_usuarios_meta['email'].astype(str).str.strip().str.lower() == email_vinculado
+                        )
+                        if not mask_meta.any():
+                            st.error("Aluno não encontrado para salvar a meta.")
+                        else:
+                            df_usuarios_meta.loc[mask_meta, 'treinos_semanais'] = int(nova_meta)
+                            conn.update(worksheet='usuarios', data=df_usuarios_meta)
+                            st.session_state.meta_semanal_confirmada = (
+                                f'Meta semanal de {int(nova_meta)} treino(s) salva para {nome_sel}.'
+                            )
+                            ler_planilha.clear()
+                            st.rerun()
+                    except Exception as e:
+                        if erro_quota_google(e):
+                            st.warning("Limite temporário do Google Sheets. Aguarde um minuto e tente novamente.")
+                        else:
+                            st.error(f"Não foi possível salvar a meta: {e}")
 
             if not df_coach.empty and 'email_aluno' in df_coach.columns:
                 df_coach['email_aluno'] = df_coach['email_aluno'].astype(str).str.strip().str.lower()
