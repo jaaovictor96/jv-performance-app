@@ -57,7 +57,8 @@ defaults = {
     'ex_index': 0, 'cargas_sessao': {}, 'reps_sessao': {},
     'exercicios_concluidos': [], 'ultimo_salvamento_treino': '',
     'rascunho_servidor_ok': None, 'treino_finalizado': False,
-    'notas_sessao': '', 'aba_ativa': 'treino'
+    'notas_sessao': '', 'aba_ativa': 'treino',
+    'coach_dashboard_visivel': False
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -1213,7 +1214,10 @@ else:
     if st.session_state.email == EMAIL_COACH:
         st.sidebar.divider()
         st.sidebar.subheader("🛠 PAINEL DO COACH")
-        ativar_dashboard = st.sidebar.checkbox("Visualizar Métricas")
+        ativar_dashboard = st.sidebar.checkbox(
+            "Visualizar Métricas",
+            key="coach_dashboard_visivel"
+        )
 
     # ==========================================================
     # DASHBOARD DO COACH
