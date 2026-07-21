@@ -901,6 +901,51 @@ st.markdown(f"""
         font-size: 11px; opacity: 0.7; margin-top: 8px;
     }}
 
+    .workout-preview {{
+        background: rgba(20,19,19,0.96);
+        border: 1px solid rgba(255,255,255,0.07);
+        border-radius: 14px; overflow: hidden; margin: 10px 0 14px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.28);
+        animation: fadeSlideUp 0.3s ease both;
+    }}
+    .workout-preview-header {{
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.07);
+    }}
+    .workout-preview-title {{
+        color: #F9C03D; font-family: 'Inter', sans-serif; font-size: 10px;
+        font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+    }}
+    .workout-preview-count {{
+        color: #777; font-family: 'Inter', sans-serif; font-size: 11px;
+        white-space: nowrap;
+    }}
+    .workout-preview-item {{
+        display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px;
+        align-items: start; padding: 13px 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.055);
+    }}
+    .workout-preview-item:last-child {{ border-bottom: 0; }}
+    .workout-preview-index {{
+        display: flex; align-items: center; justify-content: center;
+        width: 26px; height: 26px; border-radius: 50%;
+        background: rgba(249,192,61,0.11); color: #F9C03D;
+        font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 800;
+    }}
+    .workout-preview-name {{
+        color: #F4F4F4; font-family: 'Inter', sans-serif; font-size: 13px;
+        font-weight: 750; line-height: 1.3; text-transform: uppercase;
+        overflow-wrap: anywhere;
+    }}
+    .workout-preview-observation {{
+        color: #9D9D9D; font-family: 'Inter', sans-serif; font-size: 11px;
+        line-height: 1.4; margin-top: 4px; overflow-wrap: anywhere;
+    }}
+    .workout-preview-meta {{
+        color: #F9C03D; font-family: 'Inter', sans-serif; font-size: 10px;
+        line-height: 1.4; margin-top: 5px; text-transform: uppercase;
+    }}
+
     .progress-bar-bg {{
         background: rgba(255,255,255,0.06); border-radius: 99px;
         height: 5px; overflow: hidden; margin: 12px 0 4px;
@@ -1915,6 +1960,47 @@ else:
                     selecao_treino = st.selectbox("Selecione o treino:", treinos_disponiveis, index=indice_treino_padrao)
 
                     if not treino_ativo_atual:
+                        exercicios_preview = meus_treinos[
+                            meus_treinos['treino_nome'] == selecao_treino
+                        ].reset_index(drop=True)
+                        itens_preview = []
+                        for idx_preview, row_preview in exercicios_preview.iterrows():
+                            nome_preview = html.escape(str(row_preview.get('exercicio', '')).strip())
+                            series_valor = pd.to_numeric(row_preview.get('series'), errors='coerce')
+                            reps_valor = pd.to_numeric(row_preview.get('reps'), errors='coerce')
+                            series_preview = int(series_valor) if pd.notna(series_valor) else 0
+                            reps_preview = int(reps_valor) if pd.notna(reps_valor) else 0
+
+                            observacao_valor = row_preview.get('observacoes', '')
+                            if pd.isna(observacao_valor) or str(observacao_valor).strip().lower() in ('', 'nan', 'none'):
+                                observacao_preview = ''
+                            else:
+                                observacao_html = html.escape(str(observacao_valor).strip()).replace(chr(13) + chr(10), '<br>').replace(chr(10), '<br>')
+                                observacao_preview = f"<div class='workout-preview-observation'>{observacao_html}</div>"
+
+                            itens_preview.append(
+                                "<div class='workout-preview-item'>"
+                                f"<div class='workout-preview-index'>{idx_preview + 1}</div>"
+                                "<div>"
+                                f"<div class='workout-preview-name'>{nome_preview}</div>"
+                                f"{observacao_preview}"
+                                f"<div class='workout-preview-meta'>{series_preview} séries × {reps_preview} reps</div>"
+                                "</div></div>"
+                            )
+
+                        total_preview = len(exercicios_preview)
+                        rotulo_exercicios = "exercício" if total_preview == 1 else "exercícios"
+                        st.markdown(
+                            "<div class='workout-preview'>"
+                            "<div class='workout-preview-header'>"
+                            "<span class='workout-preview-title'>Prévia do treino</span>"
+                            f"<span class='workout-preview-count'>{total_preview} {rotulo_exercicios}</span>"
+                            "</div>"
+                            f"{''.join(itens_preview)}"
+                            "</div>",
+                            unsafe_allow_html=True
+                        )
+
                         st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
                         if st.button("Iniciar treino", key="btn_iniciar_treino", use_container_width=True):
                             st.session_state.treino_ativo = selecao_treino
@@ -1928,7 +2014,6 @@ else:
                             st.session_state.notas_sessao = ""
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
-                        st.info("Selecione um treino e toque em Iniciar treino para começar.")
                         st.stop()
 
                     if str(selecao_treino) != str(treino_ativo_atual):
