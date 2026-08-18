@@ -121,6 +121,10 @@ COLUNAS_MODELOS_TREINO = [
     "modelo_nome", "treino_nome", "ordem", "exercicio", "series", "reps",
     "observacoes", "video_url", "criado_em"
 ]
+COLUNAS_HISTORICO_PROTOCOLOS = [
+    "email_aluno", "nome_aluno", "treino_nome", "versao", "acao", "registrado_em",
+    "ordem", "exercicio", "series", "reps", "observacoes", "video_url"
+]
 COLUNAS_EDITOR_TREINO = [
     "ordem", "exercicio", "series", "reps", "observacoes", "video_url"
 ]
@@ -212,6 +216,29 @@ def garantir_aba_montador(worksheet, colunas):
         conn.create(worksheet=worksheet, data=pd.DataFrame(columns=colunas))
         ler_planilha.clear()
         return pd.DataFrame(columns=colunas)
+
+
+def registrar_versao_protocolo(df_historico, email, nome_aluno, treino_nome, linhas, acao):
+    """Acrescenta um retrato completo e recuperável do protocolo ao histórico."""
+    historico = dataframe_com_colunas(df_historico, COLUNAS_HISTORICO_PROTOCOLOS)
+    email_normalizado = str(email).strip().lower()
+    treino_normalizado = str(treino_nome).strip()
+    existentes = historico[
+        (historico["email_aluno"].fillna("").astype(str).str.strip().str.lower() == email_normalizado) &
+        (historico["treino_nome"].fillna("").astype(str).str.strip() == treino_normalizado)
+    ]
+    versoes = pd.to_numeric(existentes["versao"], errors="coerce").dropna()
+    proxima_versao = int(versoes.max()) + 1 if not versoes.empty else 1
+
+    snapshot = normalizar_editor_treino(linhas)
+    snapshot["email_aluno"] = email_normalizado
+    snapshot["nome_aluno"] = str(nome_aluno).strip()
+    snapshot["treino_nome"] = treino_normalizado
+    snapshot["versao"] = proxima_versao
+    snapshot["acao"] = str(acao).strip()
+    snapshot["registrado_em"] = agora_brasilia().strftime("%d/%m/%Y %H:%M")
+    snapshot = dataframe_com_colunas(snapshot, COLUNAS_HISTORICO_PROTOCOLOS)[COLUNAS_HISTORICO_PROTOCOLOS]
+    return pd.concat([historico[COLUNAS_HISTORICO_PROTOCOLOS], snapshot], ignore_index=True), proxima_versao
 
 # --- 7. FUNÇÕES DE ENGAJAMENTO ---
 
@@ -1365,6 +1392,618 @@ else:
             "Visualizar Métricas",
             key="coach_dashboard_visivel"
         )
+        st.sidebar.divider()
+        mostrar_montador_sidebar = st.sidebar.checkbox(
+            "🏋️ Montador de Treinos",
+            key="coach_montador_sidebar_visivel"
+        )
+        if mostrar_montador_sidebar:
+            with st.sidebar:
+                st.markdown(
+                    "<p style='color:#F9C03D;font-family:Space Grotesk;font-weight:900;"
+                    "font-size:0.85rem;letter-spacing:1px;text-transform:uppercase;margin-top:6px;'>"
+                    "🏋️ Montador de Treinos</p>",
+                    unsafe_allow_html=True
+                )
+                try:
+                    df_usuarios_montador_sidebar = ler_sem_cache("usuarios")
+                except Exception as e:
+                    df_usuarios_montador_sidebar = pd.DataFrame()
+                    if erro_quota_google(e):
+                        st.warning("O Google Sheets está temporariamente ocupado. Tente novamente em instantes.")
+                    else:
+                        st.error(f"Não foi possível carregar os alunos: {e}")
+
+                if df_usuarios_montador_sidebar.empty:
+                    st.info("Nenhum aluno cadastrado.")
+                else:
+                    df_usuarios_montador_sidebar['email'] = (
+                        df_usuarios_montador_sidebar['email'].astype(str).str.strip().str.lower()
+                    )
+                    df_alunos_montador_sidebar = df_usuarios_montador_sidebar[
+                        df_usuarios_montador_sidebar['email'] != EMAIL_COACH.lower()
+                    ].sort_values('nome', key=lambda s: s.astype(str).str.lower())
+                    opcoes_alunos_montador = df_alunos_montador_sidebar['nome'].dropna().unique().tolist()
+                    if not opcoes_alunos_montador:
+                        st.info("Nenhum aluno cadastrado.")
+                    else:
+                        nome_sel = st.selectbox(
+                            "Aluno:",
+                            opcoes_alunos_montador,
+                            key="montador_sidebar_aluno_select"
+                        )
+                        email_vinculado = df_alunos_montador_sidebar[
+                            df_alunos_montador_sidebar['nome'] == nome_sel
+                        ]['email'].iloc[0]
+
+                        # ==========================================================
+                        # MONTADOR DE TREINOS DO COACH
+                        # ==========================================================
+                        st.divider()
+                        st.markdown("### 🏋️ Montador de Treinos")
+                        st.caption("Monte, ajuste e publique protocolos sem abrir a planilha. As alterações só chegam ao aluno quando você publicar.")
+
+                        try:
+                            df_treinos_montador = dataframe_com_colunas(
+                                ler_sem_cache('planilha_treinos'),
+                                ['email_aluno', 'treino_nome'] + COLUNAS_EDITOR_TREINO
+                            )
+                            df_treinos_montador['email_aluno'] = (
+                                df_treinos_montador['email_aluno'].fillna('').astype(str).str.strip().str.lower()
+                            )
+                            df_biblioteca_montador = ler_aba_opcional(
+                                'biblioteca_exercicios', COLUNAS_BIBLIOTECA_EXERCICIOS
+                            )
+                            df_modelos_montador = ler_aba_opcional(
+                                'modelos_treino', COLUNAS_MODELOS_TREINO
+                            )
+                            df_historico_protocolos = ler_aba_opcional(
+                                'historico_protocolos', COLUNAS_HISTORICO_PROTOCOLOS
+                            )
+                            catalogo_exercicios = preparar_catalogo_exercicios(
+                                df_treinos_montador, df_biblioteca_montador
+                            )
+
+                            aba_biblioteca, aba_montar, aba_modelos, aba_historico = st.tabs([
+                                'Biblioteca', 'Montar protocolo', 'Modelos', 'Histórico'
+                            ])
+
+                            with aba_biblioteca:
+                                if df_biblioteca_montador.empty:
+                                    st.info('A biblioteca ainda não foi criada. Os exercícios já usados nos protocolos aparecem como catálogo inicial.')
+                                else:
+                                    filtro_biblioteca = st.text_input(
+                                        'Buscar exercício',
+                                        placeholder='Nome, grupo muscular ou equipamento',
+                                        key='filtro_biblioteca_exercicios'
+                                    ).strip().lower()
+                                    visualizacao_biblioteca = df_biblioteca_montador.copy()
+                                    if filtro_biblioteca:
+                                        mascara_busca = visualizacao_biblioteca.astype(str).apply(
+                                            lambda coluna: coluna.str.lower().str.contains(filtro_biblioteca, na=False)
+                                        ).any(axis=1)
+                                        visualizacao_biblioteca = visualizacao_biblioteca[mascara_busca]
+                                    st.dataframe(
+                                        visualizacao_biblioteca.rename(columns={
+                                            'exercicio': 'Exercício',
+                                            'grupo_muscular': 'Grupo muscular',
+                                            'equipamento': 'Equipamento',
+                                            'video_url': 'Vídeo',
+                                            'instrucoes': 'Instruções'
+                                        }),
+                                        hide_index=True,
+                                        use_container_width=True
+                                    )
+
+                                with st.expander('Cadastrar exercício na biblioteca', expanded=False):
+                                    with st.form('form_novo_exercicio_biblioteca', clear_on_submit=True):
+                                        novo_exercicio_nome = st.text_input('Nome do exercício')
+                                        col_grupo, col_equipamento = st.columns(2)
+                                        with col_grupo:
+                                            novo_exercicio_grupo = st.text_input('Grupo muscular')
+                                        with col_equipamento:
+                                            novo_exercicio_equipamento = st.text_input('Equipamento')
+                                        novo_exercicio_video = st.text_input('Link do vídeo (opcional)')
+                                        novo_exercicio_instrucoes = st.text_area('Instruções ou pontos de atenção (opcional)')
+                                        salvar_exercicio_biblioteca = st.form_submit_button(
+                                            'Salvar exercício na biblioteca', use_container_width=True
+                                        )
+                                    if salvar_exercicio_biblioteca:
+                                        if not novo_exercicio_nome.strip():
+                                            st.warning('Informe o nome do exercício antes de salvar.')
+                                        else:
+                                            try:
+                                                df_biblioteca_salvar = garantir_aba_montador(
+                                                    'biblioteca_exercicios', COLUNAS_BIBLIOTECA_EXERCICIOS
+                                                )
+                                                nova_linha_biblioteca = pd.DataFrame([{
+                                                    'exercicio': novo_exercicio_nome.strip(),
+                                                    'grupo_muscular': novo_exercicio_grupo.strip(),
+                                                    'equipamento': novo_exercicio_equipamento.strip(),
+                                                    'video_url': novo_exercicio_video.strip(),
+                                                    'instrucoes': novo_exercicio_instrucoes.strip()
+                                                }])
+                                                chave_novo_exercicio = novo_exercicio_nome.strip().lower()
+                                                if not df_biblioteca_salvar.empty:
+                                                    chaves_existentes = df_biblioteca_salvar['exercicio'].fillna('').astype(str).str.strip().str.lower()
+                                                    df_biblioteca_salvar = df_biblioteca_salvar[chaves_existentes != chave_novo_exercicio]
+                                                conn.update(
+                                                    worksheet='biblioteca_exercicios',
+                                                    data=pd.concat([df_biblioteca_salvar, nova_linha_biblioteca], ignore_index=True)
+                                                )
+                                                ler_planilha.clear()
+                                                st.success(f'{novo_exercicio_nome.strip()} foi salvo na biblioteca.')
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f'Não foi possível salvar o exercício: {e}')
+
+                            with aba_montar:
+                                confirmacao_arquivamento = st.session_state.pop('montador_arquivado', None)
+                                if confirmacao_arquivamento:
+                                    st.success(confirmacao_arquivamento)
+                                    st.toast('Treino arquivado!', icon='✅')
+                                protocolos_aluno = df_treinos_montador[
+                                    df_treinos_montador['email_aluno'] == email_vinculado
+                                ].copy()
+                                nomes_protocolos = sorted(
+                                    [nome for nome in protocolos_aluno['treino_nome'].dropna().astype(str).str.strip().unique() if nome],
+                                    key=str.lower
+                                )
+                                modelos_disponiveis = sorted(
+                                    [nome for nome in df_modelos_montador['modelo_nome'].dropna().astype(str).str.strip().unique() if nome],
+                                    key=str.lower
+                                )
+
+                                col_origem, col_item_origem = st.columns(2)
+                                with col_origem:
+                                    origem_montador = st.selectbox(
+                                        'Começar a partir de',
+                                        ['Novo protocolo', 'Protocolo atual', 'Modelo padronizado'],
+                                        key=f'montador_origem_{email_vinculado}'
+                                    )
+                                with col_item_origem:
+                                    if origem_montador == 'Protocolo atual':
+                                        item_origem = st.selectbox(
+                                            'Protocolo', nomes_protocolos or ['Nenhum protocolo cadastrado'],
+                                            key=f'montador_protocolo_origem_{email_vinculado}'
+                                        )
+                                    elif origem_montador == 'Modelo padronizado':
+                                        item_origem = st.selectbox(
+                                            'Modelo', modelos_disponiveis or ['Nenhum modelo cadastrado'],
+                                            key=f'montador_modelo_origem_{email_vinculado}'
+                                        )
+                                    else:
+                                        item_origem = ''
+                                        st.caption('Você começará com uma estrutura vazia.')
+
+                                if st.button('Carregar no montador', key=f'carregar_montador_{email_vinculado}', use_container_width=True):
+                                    if origem_montador == 'Protocolo atual' and item_origem in nomes_protocolos:
+                                        linhas_origem = protocolos_aluno[
+                                            protocolos_aluno['treino_nome'].astype(str).str.strip() == item_origem
+                                        ]
+                                        iniciar_montador_treino(email_vinculado, item_origem, preparar_exercicios_editor(linhas_origem), 'protocolo')
+                                    elif origem_montador == 'Modelo padronizado' and item_origem in modelos_disponiveis:
+                                        linhas_origem = df_modelos_montador[
+                                            df_modelos_montador['modelo_nome'].astype(str).str.strip() == item_origem
+                                        ]
+                                        nome_treino_modelo = str(linhas_origem.iloc[0].get('treino_nome', item_origem)).strip() or item_origem
+                                        iniciar_montador_treino(email_vinculado, nome_treino_modelo, preparar_exercicios_editor(linhas_origem), 'modelo')
+                                    else:
+                                        iniciar_montador_treino(email_vinculado, 'Novo treino', pd.DataFrame(columns=COLUNAS_EDITOR_TREINO), 'novo')
+                                    st.rerun()
+
+                                montador_aberto = st.session_state.get('montador_email') == email_vinculado
+                                if not montador_aberto:
+                                    st.info('Escolha uma origem e toque em Carregar no montador.')
+                                else:
+                                    st.divider()
+                                    col_nome_treino, col_descartar = st.columns([3, 1])
+                                    with col_nome_treino:
+                                        nome_treino_editor = st.text_input(
+                                            'Nome do treino',
+                                            value=st.session_state.get('montador_treino_nome', 'Novo treino'),
+                                            key=f'montador_nome_treino_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
+                                        )
+                                    with col_descartar:
+                                        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                                        if st.button('Descartar', key=f'descartar_montador_{email_vinculado}', use_container_width=True):
+                                            apagar_montador_treino()
+                                            st.rerun()
+
+                                    catalogo_opcoes = catalogo_exercicios['exercicio'].tolist()
+                                    col_adicionar, col_botao_adicionar = st.columns([3, 1])
+                                    with col_adicionar:
+                                        exercicio_para_adicionar = st.selectbox(
+                                            'Adicionar exercício da biblioteca',
+                                            catalogo_opcoes or ['Cadastre um exercício na Biblioteca'],
+                                            key=f'adicionar_exercicio_montador_{email_vinculado}'
+                                        )
+                                    with col_botao_adicionar:
+                                        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                                        adicionar_exercicio = st.button(
+                                            'Adicionar', key=f'btn_adicionar_exercicio_{email_vinculado}', use_container_width=True
+                                        )
+                                    if adicionar_exercicio:
+                                        if exercicio_para_adicionar in catalogo_opcoes:
+                                            registro_catalogo = catalogo_exercicios[
+                                                catalogo_exercicios['exercicio'] == exercicio_para_adicionar
+                                            ].iloc[0]
+                                            linhas_editor = normalizar_editor_treino(st.session_state.get('montador_linhas'))
+                                            proxima_ordem = int(linhas_editor['ordem'].max()) + 1 if not linhas_editor.empty else 1
+                                            nova_linha_editor = pd.DataFrame([{
+                                                'ordem': proxima_ordem,
+                                                'exercicio': exercicio_para_adicionar,
+                                                'series': 0,
+                                                'reps': 0,
+                                                'observacoes': str(registro_catalogo.get('instrucoes', '') or ''),
+                                                'video_url': str(registro_catalogo.get('video_url', '') or '')
+                                            }])
+                                            st.session_state.montador_linhas = pd.concat(
+                                                [linhas_editor, nova_linha_editor], ignore_index=True
+                                            )
+                                            st.session_state.montador_versao = int(st.session_state.get('montador_versao', 0)) + 1
+                                            st.rerun()
+
+                                    linhas_editor = normalizar_editor_treino(st.session_state.get('montador_linhas'))
+                                    with st.form(f'form_editor_treino_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'):
+                                        linhas_editadas = st.data_editor(
+                                            linhas_editor,
+                                            hide_index=True,
+                                            num_rows='dynamic',
+                                            use_container_width=True,
+                                            column_config={
+                                                'ordem': st.column_config.NumberColumn('Ordem', min_value=1, step=1, required=True),
+                                                'exercicio': st.column_config.TextColumn('Exercício', required=True),
+                                                'series': st.column_config.NumberColumn('Séries', min_value=0, step=1, required=True),
+                                                'reps': st.column_config.NumberColumn('Reps', min_value=0, step=1, required=True),
+                                                'observacoes': st.column_config.TextColumn('Observações'),
+                                                'video_url': st.column_config.TextColumn('Vídeo')
+                                            },
+                                            key=f'tabela_montador_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
+                                        )
+                                        atualizar_editor = st.form_submit_button('Atualizar rascunho', use_container_width=True)
+                                    if atualizar_editor:
+                                        st.session_state.montador_linhas = normalizar_editor_treino(linhas_editadas)
+                                        st.session_state.montador_treino_nome = nome_treino_editor.strip()
+                                        st.session_state.montador_versao = int(st.session_state.get('montador_versao', 0)) + 1
+                                        st.success('Rascunho atualizado. O aluno ainda não vê estas alterações.')
+                                        st.rerun()
+
+                                    linhas_para_video = normalizar_editor_treino(st.session_state.get('montador_linhas'))
+                                    if not linhas_para_video.empty:
+                                        opcoes_video = linhas_para_video['exercicio'].tolist()
+                                        exercicio_video = st.selectbox(
+                                            'Ver vídeo ou instruções do exercício', opcoes_video,
+                                            key=f'video_montador_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
+                                        )
+                                        linha_video = linhas_para_video[linhas_para_video['exercicio'] == exercicio_video].iloc[0]
+                                        instrucoes_video = str(linha_video.get('observacoes', '') or '').strip()
+                                        url_video = str(linha_video.get('video_url', '') or '').strip()
+                                        if instrucoes_video:
+                                            st.caption(instrucoes_video)
+                                        if url_video.startswith('http'):
+                                            embed_video = html.escape(
+                                                url_video.split('?')[0].replace('/view', '/preview').replace('/edit', '/preview'),
+                                                quote=True
+                                            )
+                                            st.components.v1.html(
+                                                f'<div style="position:relative;width:100%;padding-top:56.25%;overflow:hidden;border-radius:12px;background:#111;"><iframe src="{embed_video}" style="position:absolute;inset:0;width:100%;height:100%;border:0;" allowfullscreen></iframe></div>',
+                                                height=260
+                                            )
+                                        elif not instrucoes_video:
+                                            st.caption('Adicione uma observação ou vídeo para este exercício na tabela acima.')
+
+                                    st.divider()
+                                    col_modelo, col_publicar, col_arquivar, col_excluir = st.columns(4)
+                                    with col_modelo:
+                                        abrir_salvar_modelo = st.button(
+                                            'Salvar como modelo', key=f'abrir_modelo_{email_vinculado}', use_container_width=True
+                                        )
+                                    with col_publicar:
+                                        publicar_treino = st.button(
+                                            'Publicar para aluno', key=f'publicar_treino_{email_vinculado}', use_container_width=True,
+                                            type='primary'
+                                        )
+                                    with col_arquivar:
+                                        arquivar_treino = st.button(
+                                            'Arquivar treino atual', key=f'arquivar_treino_{email_vinculado}', use_container_width=True,
+                                            disabled=not bool(st.session_state.get('montador_treino_original'))
+                                        )
+                                    with col_excluir:
+                                        excluir_treino = st.button(
+                                            'Excluir definitivamente', key=f'excluir_treino_{email_vinculado}', use_container_width=True,
+                                            disabled=not bool(st.session_state.get('montador_treino_original'))
+                                        )
+
+                                    if abrir_salvar_modelo:
+                                        st.session_state.salvar_modelo_aberto = email_vinculado
+                                    if st.session_state.get('salvar_modelo_aberto') == email_vinculado:
+                                        with st.form(f'form_salvar_modelo_{email_vinculado}'):
+                                            nome_modelo_salvar = st.text_input('Nome do modelo', value=nome_treino_editor.strip())
+                                            confirmar_modelo = st.form_submit_button('Confirmar modelo', use_container_width=True)
+                                        if confirmar_modelo:
+                                            linhas_modelo = normalizar_editor_treino(st.session_state.get('montador_linhas'))
+                                            if not nome_modelo_salvar.strip() or linhas_modelo.empty:
+                                                st.warning('Informe um nome e inclua ao menos um exercício no modelo.')
+                                            else:
+                                                try:
+                                                    df_modelos_salvar = garantir_aba_montador('modelos_treino', COLUNAS_MODELOS_TREINO)
+                                                    chave_modelo = nome_modelo_salvar.strip().lower()
+                                                    if not df_modelos_salvar.empty:
+                                                        modelos_existentes = df_modelos_salvar['modelo_nome'].fillna('').astype(str).str.strip().str.lower()
+                                                        df_modelos_salvar = df_modelos_salvar[modelos_existentes != chave_modelo]
+                                                    linhas_modelo['modelo_nome'] = nome_modelo_salvar.strip()
+                                                    linhas_modelo['treino_nome'] = nome_treino_editor.strip() or nome_modelo_salvar.strip()
+                                                    linhas_modelo['criado_em'] = agora_brasilia().strftime('%d/%m/%Y %H:%M')
+                                                    linhas_modelo = dataframe_com_colunas(linhas_modelo, COLUNAS_MODELOS_TREINO)[COLUNAS_MODELOS_TREINO]
+                                                    conn.update(
+                                                        worksheet='modelos_treino',
+                                                        data=pd.concat([df_modelos_salvar, linhas_modelo], ignore_index=True)
+                                                    )
+                                                    ler_planilha.clear()
+                                                    st.session_state.salvar_modelo_aberto = None
+                                                    st.success(f'Modelo {nome_modelo_salvar.strip()} salvo com sucesso.')
+                                                    st.rerun()
+                                                except Exception as e:
+                                                    st.error(f'Não foi possível salvar o modelo: {e}')
+
+                                    if publicar_treino:
+                                        linhas_publicar = normalizar_editor_treino(st.session_state.get('montador_linhas'))
+                                        nome_publicar = nome_treino_editor.strip()
+                                        if not nome_publicar or nome_publicar.lower() == 'novo treino':
+                                            st.warning('Dê um nome ao treino antes de publicar.')
+                                        elif linhas_publicar.empty:
+                                            st.warning('Inclua pelo menos um exercício antes de publicar.')
+                                        else:
+                                            try:
+                                                df_publicar = dataframe_com_colunas(
+                                                    ler_sem_cache('planilha_treinos'),
+                                                    ['email_aluno', 'treino_nome'] + COLUNAS_EDITOR_TREINO
+                                                )
+                                                df_publicar['email_aluno'] = df_publicar['email_aluno'].fillna('').astype(str).str.strip().str.lower()
+                                                treino_antigo = str(st.session_state.get('montador_treino_original', '')).strip()
+                                                if treino_antigo:
+                                                    remover = (
+                                                        (df_publicar['email_aluno'] == email_vinculado) &
+                                                        (df_publicar['treino_nome'].fillna('').astype(str).str.strip() == treino_antigo)
+                                                    )
+                                                else:
+                                                    remover = (
+                                                        (df_publicar['email_aluno'] == email_vinculado) &
+                                                        (df_publicar['treino_nome'].fillna('').astype(str).str.strip() == nome_publicar)
+                                                    )
+                                                restante = df_publicar[~remover].copy()
+                                                linhas_publicar['email_aluno'] = email_vinculado
+                                                linhas_publicar['treino_nome'] = nome_publicar
+                                                novas_linhas = dataframe_com_colunas(
+                                                    linhas_publicar, restante.columns.tolist()
+                                                )[restante.columns]
+                                                conn.update(
+                                                    worksheet='planilha_treinos',
+                                                    data=pd.concat([restante, novas_linhas], ignore_index=True)
+                                                )
+                                                aviso_historico = ''
+                                                try:
+                                                    df_historico_salvar = garantir_aba_montador(
+                                                        'historico_protocolos', COLUNAS_HISTORICO_PROTOCOLOS
+                                                    )
+                                                    historico_atualizado, versao_publicada = registrar_versao_protocolo(
+                                                        df_historico_salvar,
+                                                        email_vinculado,
+                                                        nome_sel,
+                                                        nome_publicar,
+                                                        linhas_publicar,
+                                                        'Publicado'
+                                                    )
+                                                    conn.update(worksheet='historico_protocolos', data=historico_atualizado)
+                                                    aviso_historico = f' Versão {versao_publicada} salva no histórico.'
+                                                except Exception:
+                                                    aviso_historico = ' O protocolo foi publicado, mas o histórico não pôde ser registrado agora.'
+                                                ler_planilha.clear()
+                                                iniciar_montador_treino(email_vinculado, nome_publicar, linhas_publicar, 'protocolo')
+                                                st.session_state.montador_publicado = (
+                                                    f'Protocolo {nome_publicar} publicado para {nome_sel} com {len(linhas_publicar)} exercício(s).'
+                                                    f'{aviso_historico}'
+                                                )
+                                                st.rerun()
+                                            except Exception as e:
+                                                if erro_quota_google(e):
+                                                    st.warning('O Google Sheets está temporariamente ocupado. Aguarde um minuto antes de publicar novamente.')
+                                                else:
+                                                    st.error(f'Não foi possível publicar o protocolo: {e}')
+
+                                    if arquivar_treino:
+                                        st.session_state.confirmar_arquivamento_treino = email_vinculado
+                                    if st.session_state.get('confirmar_arquivamento_treino') == email_vinculado:
+                                        confirmar_arquivamento = st.checkbox(
+                                            'Confirmo o arquivamento deste treino ativo',
+                                            key=f'confirmar_arquivamento_treino_{email_vinculado}'
+                                        )
+                                        if st.button(
+                                            'Confirmar arquivamento',
+                                            key=f'btn_confirmar_arquivamento_{email_vinculado}',
+                                            disabled=not confirmar_arquivamento,
+                                            use_container_width=True
+                                        ):
+                                            try:
+                                                nome_arquivar = str(st.session_state.get('montador_treino_original', '')).strip()
+                                                df_arquivar = dataframe_com_colunas(
+                                                    ler_sem_cache('planilha_treinos'),
+                                                    ['email_aluno', 'treino_nome'] + COLUNAS_EDITOR_TREINO
+                                                )
+                                                df_arquivar['email_aluno'] = df_arquivar['email_aluno'].fillna('').astype(str).str.strip().str.lower()
+                                                mascara_arquivar = (
+                                                    (df_arquivar['email_aluno'] == email_vinculado) &
+                                                    (df_arquivar['treino_nome'].fillna('').astype(str).str.strip() == nome_arquivar)
+                                                )
+                                                treino_ativo_arquivar = preparar_exercicios_editor(df_arquivar[mascara_arquivar])
+                                                if treino_ativo_arquivar.empty:
+                                                    st.warning('Este protocolo não está mais ativo para ser arquivado.')
+                                                else:
+                                                    df_historico_arquivar = garantir_aba_montador(
+                                                        'historico_protocolos', COLUNAS_HISTORICO_PROTOCOLOS
+                                                    )
+                                                    historico_arquivado, versao_arquivada = registrar_versao_protocolo(
+                                                        df_historico_arquivar,
+                                                        email_vinculado,
+                                                        nome_sel,
+                                                        nome_arquivar,
+                                                        treino_ativo_arquivar,
+                                                        'Arquivado'
+                                                    )
+                                                    # Primeiro confirma a cópia recuperável; só então remove o protocolo ativo.
+                                                    conn.update(worksheet='historico_protocolos', data=historico_arquivado)
+                                                    conn.update(worksheet='planilha_treinos', data=df_arquivar[~mascara_arquivar].copy())
+                                                    ler_planilha.clear()
+                                                    apagar_montador_treino()
+                                                    st.session_state.confirmar_arquivamento_treino = None
+                                                    st.session_state.montador_arquivado = (
+                                                        f'Treino {nome_arquivar} arquivado com sucesso como versão {versao_arquivada}.'
+                                                    )
+                                                    st.rerun()
+                                            except Exception as e:
+                                                if erro_quota_google(e):
+                                                    st.warning('O Google Sheets está temporariamente ocupado. Aguarde um minuto antes de arquivar novamente.')
+                                                else:
+                                                    st.error(f'Não foi possível arquivar o treino: {e}')
+
+                                    if excluir_treino:
+                                        st.session_state.confirmar_exclusao_treino = email_vinculado
+                                    if st.session_state.get('confirmar_exclusao_treino') == email_vinculado:
+                                        confirmar_exclusao = st.checkbox(
+                                            'Confirmo a exclusão deste protocolo ativo',
+                                            key=f'confirmar_exclusao_treino_{email_vinculado}'
+                                        )
+                                        if st.button('Confirmar exclusão', key=f'btn_confirmar_exclusao_{email_vinculado}', disabled=not confirmar_exclusao, use_container_width=True):
+                                            try:
+                                                nome_excluir = str(st.session_state.get('montador_treino_original', '')).strip()
+                                                df_excluir = dataframe_com_colunas(
+                                                    ler_sem_cache('planilha_treinos'), ['email_aluno', 'treino_nome'] + COLUNAS_EDITOR_TREINO
+                                                )
+                                                df_excluir['email_aluno'] = df_excluir['email_aluno'].fillna('').astype(str).str.strip().str.lower()
+                                                remover_excluir = (
+                                                    (df_excluir['email_aluno'] == email_vinculado) &
+                                                    (df_excluir['treino_nome'].fillna('').astype(str).str.strip() == nome_excluir)
+                                                )
+                                                conn.update(worksheet='planilha_treinos', data=df_excluir[~remover_excluir].copy())
+                                                ler_planilha.clear()
+                                                apagar_montador_treino()
+                                                st.session_state.confirmar_exclusao_treino = None
+                                                st.success(f'Protocolo {nome_excluir} excluído.')
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f'Não foi possível excluir o protocolo: {e}')
+
+                                    confirmacao_publicacao = st.session_state.pop('montador_publicado', None)
+                                    if confirmacao_publicacao:
+                                        st.success(confirmacao_publicacao)
+                                        st.toast('Protocolo publicado!', icon='✅')
+
+                            with aba_modelos:
+                                if df_modelos_montador.empty:
+                                    st.info('Ainda não há modelos. Monte um treino e use Salvar como modelo para criar o primeiro.')
+                                else:
+                                    resumo_modelos = (
+                                        df_modelos_montador.groupby('modelo_nome', dropna=False)
+                                        .agg(
+                                            Treino=('treino_nome', 'first'),
+                                            Exercícios=('exercicio', 'count'),
+                                            Criado_em=('criado_em', 'max')
+                                        )
+                                        .reset_index()
+                                        .rename(columns={'modelo_nome': 'Modelo'})
+                                        .sort_values('Modelo', key=lambda s: s.astype(str).str.lower())
+                                    )
+                                    st.dataframe(resumo_modelos, hide_index=True, use_container_width=True)
+                                    modelo_excluir = st.selectbox(
+                                        'Excluir modelo',
+                                        ['Não excluir'] + resumo_modelos['Modelo'].astype(str).tolist(),
+                                        key=f'excluir_modelo_{email_vinculado}'
+                                    )
+                                    if modelo_excluir != 'Não excluir' and st.button('Excluir modelo selecionado', key=f'btn_excluir_modelo_{email_vinculado}', use_container_width=True):
+                                        try:
+                                            modelos_restantes = df_modelos_montador[
+                                                df_modelos_montador['modelo_nome'].fillna('').astype(str).str.strip() != modelo_excluir
+                                            ].copy()
+                                            conn.update(worksheet='modelos_treino', data=modelos_restantes)
+                                            ler_planilha.clear()
+                                            st.success(f'Modelo {modelo_excluir} excluído.')
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f'Não foi possível excluir o modelo: {e}')
+
+                            with aba_historico:
+                                historico_aluno = dataframe_com_colunas(
+                                    df_historico_protocolos, COLUNAS_HISTORICO_PROTOCOLOS
+                                ).copy()
+                                historico_aluno['email_aluno'] = historico_aluno['email_aluno'].fillna('').astype(str).str.strip().str.lower()
+                                historico_aluno = historico_aluno[historico_aluno['email_aluno'] == email_vinculado].copy()
+                                if historico_aluno.empty:
+                                    st.info('Ainda não há versões salvas para este aluno. Toda publicação e arquivamento passará a criar uma versão aqui.')
+                                else:
+                                    historico_aluno['versao_num'] = pd.to_numeric(historico_aluno['versao'], errors='coerce').fillna(0).astype(int)
+                                    historico_aluno['registrado_em_dt'] = parse_data_br(historico_aluno['registrado_em'])
+                                    resumo_historico = (
+                                        historico_aluno.groupby(['treino_nome', 'versao_num', 'acao', 'registrado_em', 'registrado_em_dt'], dropna=False)
+                                        .agg(Exercícios=('exercicio', 'count'))
+                                        .reset_index()
+                                        .rename(columns={
+                                            'treino_nome': 'Treino',
+                                            'versao_num': 'Versão',
+                                            'acao': 'Ação',
+                                            'registrado_em': 'Registrado em'
+                                        })
+                                        .sort_values(['registrado_em_dt', 'Versão'], ascending=[False, False])
+                                        .drop(columns='registrado_em_dt')
+                                    )
+                                    st.dataframe(resumo_historico, hide_index=True, use_container_width=True)
+                                    opcoes_versao = []
+                                    for _, item in resumo_historico.iterrows():
+                                        opcoes_versao.append(
+                                            f"{item['Treino']} · versão {int(item['Versão'])} · {item['Ação']} · {item['Registrado em']}"
+                                        )
+                                    versao_escolhida = st.selectbox(
+                                        'Versão para consultar ou restaurar', opcoes_versao,
+                                        key=f'historico_versao_{email_vinculado}'
+                                    )
+                                    indice_versao = opcoes_versao.index(versao_escolhida)
+                                    item_versao = resumo_historico.iloc[indice_versao]
+                                    linhas_versao = historico_aluno[
+                                        (historico_aluno['treino_nome'].fillna('').astype(str) == str(item_versao['Treino'])) &
+                                        (historico_aluno['versao_num'] == int(item_versao['Versão'])) &
+                                        (historico_aluno['acao'].fillna('').astype(str) == str(item_versao['Ação'])) &
+                                        (historico_aluno['registrado_em'].fillna('').astype(str) == str(item_versao['Registrado em']))
+                                    ].copy()
+                                    st.dataframe(
+                                        preparar_exercicios_editor(linhas_versao).rename(columns={
+                                            'ordem': 'Ordem', 'exercicio': 'Exercício', 'series': 'Séries',
+                                            'reps': 'Reps', 'observacoes': 'Observações', 'video_url': 'Vídeo'
+                                        }),
+                                        hide_index=True,
+                                        use_container_width=True
+                                    )
+                                    if st.button(
+                                        'Carregar versão no montador',
+                                        key=f'carregar_historico_{email_vinculado}',
+                                        use_container_width=True
+                                    ):
+                                        iniciar_montador_treino(
+                                            email_vinculado,
+                                            str(item_versao['Treino']),
+                                            preparar_exercicios_editor(linhas_versao),
+                                            'historico'
+                                        )
+                                        st.session_state.montador_treino_original = ''
+                                        st.session_state.montador_publicado = (
+                                            'Versão carregada no montador. Revise e publique para restaurá-la ao protocolo ativo.'
+                                        )
+                                        st.rerun()
+
+                        except Exception as e:
+                            if erro_quota_google(e):
+                                st.warning('O Google Sheets está temporariamente ocupado. Aguarde cerca de um minuto e tente novamente.')
+                            else:
+                                st.error(f'Não foi possível abrir o montador de treinos: {e}')
 
     # ==========================================================
     # DASHBOARD DO COACH
@@ -1513,422 +2152,6 @@ else:
                 st.stop()
             email_vinculado = df_alunos_select[df_alunos_select['nome'] == nome_sel]['email'].iloc[0]
 
-            # ==========================================================
-            # MONTADOR DE TREINOS DO COACH
-            # ==========================================================
-            st.divider()
-            st.markdown("### 🏋️ Montador de Treinos")
-            st.caption("Monte, ajuste e publique protocolos sem abrir a planilha. As alterações só chegam ao aluno quando você publicar.")
-
-            try:
-                df_treinos_montador = dataframe_com_colunas(
-                    ler_sem_cache('planilha_treinos'),
-                    ['email_aluno', 'treino_nome'] + COLUNAS_EDITOR_TREINO
-                )
-                df_treinos_montador['email_aluno'] = (
-                    df_treinos_montador['email_aluno'].fillna('').astype(str).str.strip().str.lower()
-                )
-                df_biblioteca_montador = ler_aba_opcional(
-                    'biblioteca_exercicios', COLUNAS_BIBLIOTECA_EXERCICIOS
-                )
-                df_modelos_montador = ler_aba_opcional(
-                    'modelos_treino', COLUNAS_MODELOS_TREINO
-                )
-                catalogo_exercicios = preparar_catalogo_exercicios(
-                    df_treinos_montador, df_biblioteca_montador
-                )
-
-                aba_biblioteca, aba_montar, aba_modelos = st.tabs([
-                    'Biblioteca', 'Montar protocolo', 'Modelos'
-                ])
-
-                with aba_biblioteca:
-                    if df_biblioteca_montador.empty:
-                        st.info('A biblioteca ainda não foi criada. Os exercícios já usados nos protocolos aparecem como catálogo inicial.')
-                    else:
-                        filtro_biblioteca = st.text_input(
-                            'Buscar exercício',
-                            placeholder='Nome, grupo muscular ou equipamento',
-                            key='filtro_biblioteca_exercicios'
-                        ).strip().lower()
-                        visualizacao_biblioteca = df_biblioteca_montador.copy()
-                        if filtro_biblioteca:
-                            mascara_busca = visualizacao_biblioteca.astype(str).apply(
-                                lambda coluna: coluna.str.lower().str.contains(filtro_biblioteca, na=False)
-                            ).any(axis=1)
-                            visualizacao_biblioteca = visualizacao_biblioteca[mascara_busca]
-                        st.dataframe(
-                            visualizacao_biblioteca.rename(columns={
-                                'exercicio': 'Exercício',
-                                'grupo_muscular': 'Grupo muscular',
-                                'equipamento': 'Equipamento',
-                                'video_url': 'Vídeo',
-                                'instrucoes': 'Instruções'
-                            }),
-                            hide_index=True,
-                            use_container_width=True
-                        )
-
-                    with st.expander('Cadastrar exercício na biblioteca', expanded=False):
-                        with st.form('form_novo_exercicio_biblioteca', clear_on_submit=True):
-                            novo_exercicio_nome = st.text_input('Nome do exercício')
-                            col_grupo, col_equipamento = st.columns(2)
-                            with col_grupo:
-                                novo_exercicio_grupo = st.text_input('Grupo muscular')
-                            with col_equipamento:
-                                novo_exercicio_equipamento = st.text_input('Equipamento')
-                            novo_exercicio_video = st.text_input('Link do vídeo (opcional)')
-                            novo_exercicio_instrucoes = st.text_area('Instruções ou pontos de atenção (opcional)')
-                            salvar_exercicio_biblioteca = st.form_submit_button(
-                                'Salvar exercício na biblioteca', use_container_width=True
-                            )
-                        if salvar_exercicio_biblioteca:
-                            if not novo_exercicio_nome.strip():
-                                st.warning('Informe o nome do exercício antes de salvar.')
-                            else:
-                                try:
-                                    df_biblioteca_salvar = garantir_aba_montador(
-                                        'biblioteca_exercicios', COLUNAS_BIBLIOTECA_EXERCICIOS
-                                    )
-                                    nova_linha_biblioteca = pd.DataFrame([{
-                                        'exercicio': novo_exercicio_nome.strip(),
-                                        'grupo_muscular': novo_exercicio_grupo.strip(),
-                                        'equipamento': novo_exercicio_equipamento.strip(),
-                                        'video_url': novo_exercicio_video.strip(),
-                                        'instrucoes': novo_exercicio_instrucoes.strip()
-                                    }])
-                                    chave_novo_exercicio = novo_exercicio_nome.strip().lower()
-                                    if not df_biblioteca_salvar.empty:
-                                        chaves_existentes = df_biblioteca_salvar['exercicio'].fillna('').astype(str).str.strip().str.lower()
-                                        df_biblioteca_salvar = df_biblioteca_salvar[chaves_existentes != chave_novo_exercicio]
-                                    conn.update(
-                                        worksheet='biblioteca_exercicios',
-                                        data=pd.concat([df_biblioteca_salvar, nova_linha_biblioteca], ignore_index=True)
-                                    )
-                                    ler_planilha.clear()
-                                    st.success(f'{novo_exercicio_nome.strip()} foi salvo na biblioteca.')
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f'Não foi possível salvar o exercício: {e}')
-
-                with aba_montar:
-                    protocolos_aluno = df_treinos_montador[
-                        df_treinos_montador['email_aluno'] == email_vinculado
-                    ].copy()
-                    nomes_protocolos = sorted(
-                        [nome for nome in protocolos_aluno['treino_nome'].dropna().astype(str).str.strip().unique() if nome],
-                        key=str.lower
-                    )
-                    modelos_disponiveis = sorted(
-                        [nome for nome in df_modelos_montador['modelo_nome'].dropna().astype(str).str.strip().unique() if nome],
-                        key=str.lower
-                    )
-
-                    col_origem, col_item_origem = st.columns(2)
-                    with col_origem:
-                        origem_montador = st.selectbox(
-                            'Começar a partir de',
-                            ['Novo protocolo', 'Protocolo atual', 'Modelo padronizado'],
-                            key=f'montador_origem_{email_vinculado}'
-                        )
-                    with col_item_origem:
-                        if origem_montador == 'Protocolo atual':
-                            item_origem = st.selectbox(
-                                'Protocolo', nomes_protocolos or ['Nenhum protocolo cadastrado'],
-                                key=f'montador_protocolo_origem_{email_vinculado}'
-                            )
-                        elif origem_montador == 'Modelo padronizado':
-                            item_origem = st.selectbox(
-                                'Modelo', modelos_disponiveis or ['Nenhum modelo cadastrado'],
-                                key=f'montador_modelo_origem_{email_vinculado}'
-                            )
-                        else:
-                            item_origem = ''
-                            st.caption('Você começará com uma estrutura vazia.')
-
-                    if st.button('Carregar no montador', key=f'carregar_montador_{email_vinculado}', use_container_width=True):
-                        if origem_montador == 'Protocolo atual' and item_origem in nomes_protocolos:
-                            linhas_origem = protocolos_aluno[
-                                protocolos_aluno['treino_nome'].astype(str).str.strip() == item_origem
-                            ]
-                            iniciar_montador_treino(email_vinculado, item_origem, preparar_exercicios_editor(linhas_origem), 'protocolo')
-                        elif origem_montador == 'Modelo padronizado' and item_origem in modelos_disponiveis:
-                            linhas_origem = df_modelos_montador[
-                                df_modelos_montador['modelo_nome'].astype(str).str.strip() == item_origem
-                            ]
-                            nome_treino_modelo = str(linhas_origem.iloc[0].get('treino_nome', item_origem)).strip() or item_origem
-                            iniciar_montador_treino(email_vinculado, nome_treino_modelo, preparar_exercicios_editor(linhas_origem), 'modelo')
-                        else:
-                            iniciar_montador_treino(email_vinculado, 'Novo treino', pd.DataFrame(columns=COLUNAS_EDITOR_TREINO), 'novo')
-                        st.rerun()
-
-                    montador_aberto = st.session_state.get('montador_email') == email_vinculado
-                    if not montador_aberto:
-                        st.info('Escolha uma origem e toque em Carregar no montador.')
-                    else:
-                        st.divider()
-                        col_nome_treino, col_descartar = st.columns([3, 1])
-                        with col_nome_treino:
-                            nome_treino_editor = st.text_input(
-                                'Nome do treino',
-                                value=st.session_state.get('montador_treino_nome', 'Novo treino'),
-                                key=f'montador_nome_treino_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
-                            )
-                        with col_descartar:
-                            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                            if st.button('Descartar', key=f'descartar_montador_{email_vinculado}', use_container_width=True):
-                                apagar_montador_treino()
-                                st.rerun()
-
-                        catalogo_opcoes = catalogo_exercicios['exercicio'].tolist()
-                        col_adicionar, col_botao_adicionar = st.columns([3, 1])
-                        with col_adicionar:
-                            exercicio_para_adicionar = st.selectbox(
-                                'Adicionar exercício da biblioteca',
-                                catalogo_opcoes or ['Cadastre um exercício na Biblioteca'],
-                                key=f'adicionar_exercicio_montador_{email_vinculado}'
-                            )
-                        with col_botao_adicionar:
-                            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                            adicionar_exercicio = st.button(
-                                'Adicionar', key=f'btn_adicionar_exercicio_{email_vinculado}', use_container_width=True
-                            )
-                        if adicionar_exercicio:
-                            if exercicio_para_adicionar in catalogo_opcoes:
-                                registro_catalogo = catalogo_exercicios[
-                                    catalogo_exercicios['exercicio'] == exercicio_para_adicionar
-                                ].iloc[0]
-                                linhas_editor = normalizar_editor_treino(st.session_state.get('montador_linhas'))
-                                proxima_ordem = int(linhas_editor['ordem'].max()) + 1 if not linhas_editor.empty else 1
-                                nova_linha_editor = pd.DataFrame([{
-                                    'ordem': proxima_ordem,
-                                    'exercicio': exercicio_para_adicionar,
-                                    'series': 0,
-                                    'reps': 0,
-                                    'observacoes': str(registro_catalogo.get('instrucoes', '') or ''),
-                                    'video_url': str(registro_catalogo.get('video_url', '') or '')
-                                }])
-                                st.session_state.montador_linhas = pd.concat(
-                                    [linhas_editor, nova_linha_editor], ignore_index=True
-                                )
-                                st.session_state.montador_versao = int(st.session_state.get('montador_versao', 0)) + 1
-                                st.rerun()
-
-                        linhas_editor = normalizar_editor_treino(st.session_state.get('montador_linhas'))
-                        with st.form(f'form_editor_treino_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'):
-                            linhas_editadas = st.data_editor(
-                                linhas_editor,
-                                hide_index=True,
-                                num_rows='dynamic',
-                                use_container_width=True,
-                                column_config={
-                                    'ordem': st.column_config.NumberColumn('Ordem', min_value=1, step=1, required=True),
-                                    'exercicio': st.column_config.TextColumn('Exercício', required=True),
-                                    'series': st.column_config.NumberColumn('Séries', min_value=0, step=1, required=True),
-                                    'reps': st.column_config.NumberColumn('Reps', min_value=0, step=1, required=True),
-                                    'observacoes': st.column_config.TextColumn('Observações'),
-                                    'video_url': st.column_config.TextColumn('Vídeo')
-                                },
-                                key=f'tabela_montador_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
-                            )
-                            atualizar_editor = st.form_submit_button('Atualizar rascunho', use_container_width=True)
-                        if atualizar_editor:
-                            st.session_state.montador_linhas = normalizar_editor_treino(linhas_editadas)
-                            st.session_state.montador_treino_nome = nome_treino_editor.strip()
-                            st.session_state.montador_versao = int(st.session_state.get('montador_versao', 0)) + 1
-                            st.success('Rascunho atualizado. O aluno ainda não vê estas alterações.')
-                            st.rerun()
-
-                        linhas_para_video = normalizar_editor_treino(st.session_state.get('montador_linhas'))
-                        if not linhas_para_video.empty:
-                            opcoes_video = linhas_para_video['exercicio'].tolist()
-                            exercicio_video = st.selectbox(
-                                'Ver vídeo ou instruções do exercício', opcoes_video,
-                                key=f'video_montador_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
-                            )
-                            linha_video = linhas_para_video[linhas_para_video['exercicio'] == exercicio_video].iloc[0]
-                            instrucoes_video = str(linha_video.get('observacoes', '') or '').strip()
-                            url_video = str(linha_video.get('video_url', '') or '').strip()
-                            if instrucoes_video:
-                                st.caption(instrucoes_video)
-                            if url_video.startswith('http'):
-                                embed_video = html.escape(
-                                    url_video.split('?')[0].replace('/view', '/preview').replace('/edit', '/preview'),
-                                    quote=True
-                                )
-                                st.components.v1.html(
-                                    f'<div style="position:relative;width:100%;padding-top:56.25%;overflow:hidden;border-radius:12px;background:#111;"><iframe src="{embed_video}" style="position:absolute;inset:0;width:100%;height:100%;border:0;" allowfullscreen></iframe></div>',
-                                    height=260
-                                )
-                            elif not instrucoes_video:
-                                st.caption('Adicione uma observação ou vídeo para este exercício na tabela acima.')
-
-                        st.divider()
-                        col_modelo, col_publicar, col_excluir = st.columns(3)
-                        with col_modelo:
-                            abrir_salvar_modelo = st.button(
-                                'Salvar como modelo', key=f'abrir_modelo_{email_vinculado}', use_container_width=True
-                            )
-                        with col_publicar:
-                            publicar_treino = st.button(
-                                'Publicar para aluno', key=f'publicar_treino_{email_vinculado}', use_container_width=True,
-                                type='primary'
-                            )
-                        with col_excluir:
-                            excluir_treino = st.button(
-                                'Excluir protocolo', key=f'excluir_treino_{email_vinculado}', use_container_width=True,
-                                disabled=not bool(st.session_state.get('montador_treino_original'))
-                            )
-
-                        if abrir_salvar_modelo:
-                            st.session_state.salvar_modelo_aberto = email_vinculado
-                        if st.session_state.get('salvar_modelo_aberto') == email_vinculado:
-                            with st.form(f'form_salvar_modelo_{email_vinculado}'):
-                                nome_modelo_salvar = st.text_input('Nome do modelo', value=nome_treino_editor.strip())
-                                confirmar_modelo = st.form_submit_button('Confirmar modelo', use_container_width=True)
-                            if confirmar_modelo:
-                                linhas_modelo = normalizar_editor_treino(st.session_state.get('montador_linhas'))
-                                if not nome_modelo_salvar.strip() or linhas_modelo.empty:
-                                    st.warning('Informe um nome e inclua ao menos um exercício no modelo.')
-                                else:
-                                    try:
-                                        df_modelos_salvar = garantir_aba_montador('modelos_treino', COLUNAS_MODELOS_TREINO)
-                                        chave_modelo = nome_modelo_salvar.strip().lower()
-                                        if not df_modelos_salvar.empty:
-                                            modelos_existentes = df_modelos_salvar['modelo_nome'].fillna('').astype(str).str.strip().str.lower()
-                                            df_modelos_salvar = df_modelos_salvar[modelos_existentes != chave_modelo]
-                                        linhas_modelo['modelo_nome'] = nome_modelo_salvar.strip()
-                                        linhas_modelo['treino_nome'] = nome_treino_editor.strip() or nome_modelo_salvar.strip()
-                                        linhas_modelo['criado_em'] = agora_brasilia().strftime('%d/%m/%Y %H:%M')
-                                        linhas_modelo = dataframe_com_colunas(linhas_modelo, COLUNAS_MODELOS_TREINO)[COLUNAS_MODELOS_TREINO]
-                                        conn.update(
-                                            worksheet='modelos_treino',
-                                            data=pd.concat([df_modelos_salvar, linhas_modelo], ignore_index=True)
-                                        )
-                                        ler_planilha.clear()
-                                        st.session_state.salvar_modelo_aberto = None
-                                        st.success(f'Modelo {nome_modelo_salvar.strip()} salvo com sucesso.')
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f'Não foi possível salvar o modelo: {e}')
-
-                        if publicar_treino:
-                            linhas_publicar = normalizar_editor_treino(st.session_state.get('montador_linhas'))
-                            nome_publicar = nome_treino_editor.strip()
-                            if not nome_publicar or nome_publicar.lower() == 'novo treino':
-                                st.warning('Dê um nome ao treino antes de publicar.')
-                            elif linhas_publicar.empty:
-                                st.warning('Inclua pelo menos um exercício antes de publicar.')
-                            else:
-                                try:
-                                    df_publicar = dataframe_com_colunas(
-                                        ler_sem_cache('planilha_treinos'),
-                                        ['email_aluno', 'treino_nome'] + COLUNAS_EDITOR_TREINO
-                                    )
-                                    df_publicar['email_aluno'] = df_publicar['email_aluno'].fillna('').astype(str).str.strip().str.lower()
-                                    treino_antigo = str(st.session_state.get('montador_treino_original', '')).strip()
-                                    if treino_antigo:
-                                        remover = (
-                                            (df_publicar['email_aluno'] == email_vinculado) &
-                                            (df_publicar['treino_nome'].fillna('').astype(str).str.strip() == treino_antigo)
-                                        )
-                                    else:
-                                        remover = (
-                                            (df_publicar['email_aluno'] == email_vinculado) &
-                                            (df_publicar['treino_nome'].fillna('').astype(str).str.strip() == nome_publicar)
-                                        )
-                                    restante = df_publicar[~remover].copy()
-                                    linhas_publicar['email_aluno'] = email_vinculado
-                                    linhas_publicar['treino_nome'] = nome_publicar
-                                    novas_linhas = dataframe_com_colunas(
-                                        linhas_publicar, restante.columns.tolist()
-                                    )[restante.columns]
-                                    conn.update(
-                                        worksheet='planilha_treinos',
-                                        data=pd.concat([restante, novas_linhas], ignore_index=True)
-                                    )
-                                    ler_planilha.clear()
-                                    iniciar_montador_treino(email_vinculado, nome_publicar, linhas_publicar, 'protocolo')
-                                    st.session_state.montador_publicado = (
-                                        f'Protocolo {nome_publicar} publicado para {nome_sel} com {len(linhas_publicar)} exercício(s).'
-                                    )
-                                    st.rerun()
-                                except Exception as e:
-                                    if erro_quota_google(e):
-                                        st.warning('O Google Sheets está temporariamente ocupado. Aguarde um minuto antes de publicar novamente.')
-                                    else:
-                                        st.error(f'Não foi possível publicar o protocolo: {e}')
-
-                        if excluir_treino:
-                            st.session_state.confirmar_exclusao_treino = email_vinculado
-                        if st.session_state.get('confirmar_exclusao_treino') == email_vinculado:
-                            confirmar_exclusao = st.checkbox(
-                                'Confirmo a exclusão deste protocolo ativo',
-                                key=f'confirmar_exclusao_treino_{email_vinculado}'
-                            )
-                            if st.button('Confirmar exclusão', key=f'btn_confirmar_exclusao_{email_vinculado}', disabled=not confirmar_exclusao, use_container_width=True):
-                                try:
-                                    nome_excluir = str(st.session_state.get('montador_treino_original', '')).strip()
-                                    df_excluir = dataframe_com_colunas(
-                                        ler_sem_cache('planilha_treinos'), ['email_aluno', 'treino_nome'] + COLUNAS_EDITOR_TREINO
-                                    )
-                                    df_excluir['email_aluno'] = df_excluir['email_aluno'].fillna('').astype(str).str.strip().str.lower()
-                                    remover_excluir = (
-                                        (df_excluir['email_aluno'] == email_vinculado) &
-                                        (df_excluir['treino_nome'].fillna('').astype(str).str.strip() == nome_excluir)
-                                    )
-                                    conn.update(worksheet='planilha_treinos', data=df_excluir[~remover_excluir].copy())
-                                    ler_planilha.clear()
-                                    apagar_montador_treino()
-                                    st.session_state.confirmar_exclusao_treino = None
-                                    st.success(f'Protocolo {nome_excluir} excluído.')
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f'Não foi possível excluir o protocolo: {e}')
-
-                        confirmacao_publicacao = st.session_state.pop('montador_publicado', None)
-                        if confirmacao_publicacao:
-                            st.success(confirmacao_publicacao)
-                            st.toast('Protocolo publicado!', icon='✅')
-
-                with aba_modelos:
-                    if df_modelos_montador.empty:
-                        st.info('Ainda não há modelos. Monte um treino e use Salvar como modelo para criar o primeiro.')
-                    else:
-                        resumo_modelos = (
-                            df_modelos_montador.groupby('modelo_nome', dropna=False)
-                            .agg(
-                                Treino=('treino_nome', 'first'),
-                                Exercícios=('exercicio', 'count'),
-                                Criado_em=('criado_em', 'max')
-                            )
-                            .reset_index()
-                            .rename(columns={'modelo_nome': 'Modelo'})
-                            .sort_values('Modelo', key=lambda s: s.astype(str).str.lower())
-                        )
-                        st.dataframe(resumo_modelos, hide_index=True, use_container_width=True)
-                        modelo_excluir = st.selectbox(
-                            'Excluir modelo',
-                            ['Não excluir'] + resumo_modelos['Modelo'].astype(str).tolist(),
-                            key=f'excluir_modelo_{email_vinculado}'
-                        )
-                        if modelo_excluir != 'Não excluir' and st.button('Excluir modelo selecionado', key=f'btn_excluir_modelo_{email_vinculado}', use_container_width=True):
-                            try:
-                                modelos_restantes = df_modelos_montador[
-                                    df_modelos_montador['modelo_nome'].fillna('').astype(str).str.strip() != modelo_excluir
-                                ].copy()
-                                conn.update(worksheet='modelos_treino', data=modelos_restantes)
-                                ler_planilha.clear()
-                                st.success(f'Modelo {modelo_excluir} excluído.')
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f'Não foi possível excluir o modelo: {e}')
-
-            except Exception as e:
-                if erro_quota_google(e):
-                    st.warning('O Google Sheets está temporariamente ocupado. Aguarde cerca de um minuto e tente novamente.')
-                else:
-                    st.error(f'Não foi possível abrir o montador de treinos: {e}')
 
             st.divider()
             st.markdown("#### Meta de frequência")
@@ -3009,7 +3232,3 @@ else:
 
             except Exception as e:
                 st.error(f"Erro: {e}")
-
-
-
-
