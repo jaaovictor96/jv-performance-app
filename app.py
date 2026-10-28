@@ -247,7 +247,14 @@ def render_montador_treinos(df_alunos_coach):
         st.info("Nenhum aluno cadastrado para montar um protocolo.")
         return
 
-    st.markdown("### 👤 Aluno")
+    st.markdown("""
+        <section class='builder-hero'>
+            <div class='builder-kicker'>Área exclusiva do coach</div>
+            <div class='builder-title'>Prescrição de treino</div>
+            <p class='builder-copy'>Crie protocolos, adapte exercícios e publique apenas quando estiver pronto.</p>
+        </section>
+    """, unsafe_allow_html=True)
+    st.markdown("<p class='builder-section-label'>1. ESCOLHA O ALUNO</p>", unsafe_allow_html=True)
     alunos_ordenados = df_alunos_coach.sort_values(
         'nome', key=lambda s: s.astype(str).str.lower()
     ).copy()
@@ -269,8 +276,8 @@ def render_montador_treinos(df_alunos_coach):
     # MONTADOR DE TREINOS DO COACH
     # ==========================================================
     st.divider()
-    st.markdown("### 🏋️ Montador de Treinos")
-    st.caption("Monte, ajuste e publique protocolos sem abrir a planilha. As alterações só chegam ao aluno quando você publicar.")
+    st.markdown(f"<p class='builder-section-label'>2. PLANEJE O PROTOCOLO DE {html.escape(str(nome_sel).upper())}</p>", unsafe_allow_html=True)
+    st.caption("As alterações ficam em rascunho até você publicar para o aluno.")
 
     try:
         df_treinos_montador = dataframe_com_colunas(
@@ -439,41 +446,58 @@ def render_montador_treinos(df_alunos_coach):
                         apagar_montador_treino()
                         st.rerun()
 
-                catalogo_opcoes = catalogo_exercicios['exercicio'].tolist()
-                col_adicionar, col_botao_adicionar = st.columns([3, 1])
+                st.markdown("<p class='builder-section-label'>3. ADICIONE EXERCÍCIOS</p>", unsafe_allow_html=True)
+                filtro_catalogo = st.text_input(
+                    'Buscar na biblioteca', placeholder='Ex.: agachamento, costas, halter...',
+                    key=f'filtro_catalogo_montador_{email_vinculado}'
+                ).strip().lower()
+                catalogo_visivel = catalogo_exercicios.copy()
+                if filtro_catalogo:
+                    mascara_catalogo = catalogo_visivel.astype(str).apply(
+                        lambda coluna: coluna.str.lower().str.contains(filtro_catalogo, na=False)
+                    ).any(axis=1)
+                    catalogo_visivel = catalogo_visivel[mascara_catalogo]
+                catalogo_opcoes = catalogo_visivel['exercicio'].tolist()
+                col_adicionar, col_series_novas, col_reps_novas, col_botao_adicionar = st.columns([2.3, .7, .7, .9])
                 with col_adicionar:
                     exercicio_para_adicionar = st.selectbox(
-                        'Adicionar exercício da biblioteca',
-                        catalogo_opcoes or ['Cadastre um exercício na Biblioteca'],
+                        'Exercício', catalogo_opcoes or ['Nenhum exercício encontrado'],
                         key=f'adicionar_exercicio_montador_{email_vinculado}'
                     )
+                with col_series_novas:
+                    series_novas = st.number_input('Séries', min_value=1, value=3, step=1, key=f'series_novas_{email_vinculado}')
+                with col_reps_novas:
+                    reps_novas = st.number_input('Reps', min_value=1, value=10, step=1, key=f'reps_novas_{email_vinculado}')
                 with col_botao_adicionar:
                     st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                    adicionar_exercicio = st.button(
-                        'Adicionar', key=f'btn_adicionar_exercicio_{email_vinculado}', use_container_width=True
-                    )
-                if adicionar_exercicio:
-                    if exercicio_para_adicionar in catalogo_opcoes:
-                        registro_catalogo = catalogo_exercicios[
-                            catalogo_exercicios['exercicio'] == exercicio_para_adicionar
-                        ].iloc[0]
-                        linhas_editor = normalizar_editor_treino(st.session_state.get('montador_linhas'))
-                        proxima_ordem = int(linhas_editor['ordem'].max()) + 1 if not linhas_editor.empty else 1
-                        nova_linha_editor = pd.DataFrame([{
-                            'ordem': proxima_ordem,
-                            'exercicio': exercicio_para_adicionar,
-                            'series': 0,
-                            'reps': 0,
-                            'observacoes': str(registro_catalogo.get('instrucoes', '') or ''),
-                            'video_url': str(registro_catalogo.get('video_url', '') or '')
-                        }])
-                        st.session_state.montador_linhas = pd.concat(
-                            [linhas_editor, nova_linha_editor], ignore_index=True
-                        )
-                        st.session_state.montador_versao = int(st.session_state.get('montador_versao', 0)) + 1
-                        st.rerun()
+                    adicionar_exercicio = st.button('Adicionar', key=f'btn_adicionar_exercicio_{email_vinculado}', use_container_width=True)
+                if adicionar_exercicio and exercicio_para_adicionar in catalogo_opcoes:
+                    registro_catalogo = catalogo_visivel[catalogo_visivel['exercicio'] == exercicio_para_adicionar].iloc[0]
+                    linhas_editor = normalizar_editor_treino(st.session_state.get('montador_linhas'))
+                    proxima_ordem = int(linhas_editor['ordem'].max()) + 1 if not linhas_editor.empty else 1
+                    nova_linha_editor = pd.DataFrame([{
+                        'ordem': proxima_ordem,
+                        'exercicio': exercicio_para_adicionar,
+                        'series': int(series_novas),
+                        'reps': int(reps_novas),
+                        'observacoes': str(registro_catalogo.get('instrucoes', '') or ''),
+                        'video_url': str(registro_catalogo.get('video_url', '') or '')
+                    }])
+                    st.session_state.montador_linhas = pd.concat([linhas_editor, nova_linha_editor], ignore_index=True)
+                    st.session_state.montador_versao = int(st.session_state.get('montador_versao', 0)) + 1
+                    st.rerun()
 
                 linhas_editor = normalizar_editor_treino(st.session_state.get('montador_linhas'))
+                total_series_editor = int(pd.to_numeric(linhas_editor['series'], errors='coerce').fillna(0).sum()) if not linhas_editor.empty else 0
+                total_reps_editor = int((pd.to_numeric(linhas_editor['series'], errors='coerce').fillna(0) * pd.to_numeric(linhas_editor['reps'], errors='coerce').fillna(0)).sum()) if not linhas_editor.empty else 0
+                st.markdown(f"""
+                    <div class='builder-summary'>
+                        <div class='builder-summary-item'><div class='builder-summary-value'>{len(linhas_editor)}</div><div class='builder-summary-label'>exercícios</div></div>
+                        <div class='builder-summary-item'><div class='builder-summary-value'>{total_series_editor}</div><div class='builder-summary-label'>séries</div></div>
+                        <div class='builder-summary-item'><div class='builder-summary-value'>{total_reps_editor}</div><div class='builder-summary-label'>reps planejadas</div></div>
+                    </div>
+                """, unsafe_allow_html=True)
+                st.markdown("<p class='builder-section-label'>4. ORGANIZE O PROTOCOLO</p>", unsafe_allow_html=True)
                 with st.form(f'form_editor_treino_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'):
                     linhas_editadas = st.data_editor(
                         linhas_editor,
@@ -490,13 +514,31 @@ def render_montador_treinos(df_alunos_coach):
                         },
                         key=f'tabela_montador_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
                     )
-                    atualizar_editor = st.form_submit_button('Atualizar rascunho', use_container_width=True)
+                    atualizar_editor = st.form_submit_button('Salvar alterações no rascunho', use_container_width=True)
                 if atualizar_editor:
                     st.session_state.montador_linhas = normalizar_editor_treino(linhas_editadas)
                     st.session_state.montador_treino_nome = nome_treino_editor.strip()
                     st.session_state.montador_versao = int(st.session_state.get('montador_versao', 0)) + 1
                     st.success('Rascunho atualizado. O aluno ainda não vê estas alterações.')
                     st.rerun()
+
+                linhas_para_duplicar = normalizar_editor_treino(st.session_state.get('montador_linhas'))
+                if not linhas_para_duplicar.empty:
+                    col_duplicar, col_btn_duplicar = st.columns([3, 1])
+                    with col_duplicar:
+                        exercicio_duplicar = st.selectbox(
+                            'Duplicar exercício no final do protocolo', linhas_para_duplicar['exercicio'].tolist(),
+                            key=f'duplicar_exercicio_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
+                        )
+                    with col_btn_duplicar:
+                        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                        duplicar_exercicio = st.button('Duplicar', key=f'btn_duplicar_{email_vinculado}', use_container_width=True)
+                    if duplicar_exercicio:
+                        copia = linhas_para_duplicar[linhas_para_duplicar['exercicio'] == exercicio_duplicar].iloc[[0]].copy()
+                        copia['ordem'] = int(linhas_para_duplicar['ordem'].max()) + 1
+                        st.session_state.montador_linhas = pd.concat([linhas_para_duplicar, copia], ignore_index=True)
+                        st.session_state.montador_versao = int(st.session_state.get('montador_versao', 0)) + 1
+                        st.rerun()
 
                 linhas_para_video = normalizar_editor_treino(st.session_state.get('montador_linhas'))
                 if not linhas_para_video.empty:
@@ -1537,6 +1579,20 @@ st.markdown(f"""
     }}
 
     /* Perfil do atleta: primeira leitura da tela, pensado para uso com uma mão. */
+    .builder-hero {{
+        margin: 4px 0 18px; padding: 20px; border: 1px solid rgba(249,192,61,.22); border-radius: 8px;
+        background: linear-gradient(135deg, rgba(249,192,61,.13), rgba(20,19,19,.96) 58%);
+        box-shadow: 0 8px 28px rgba(0,0,0,.24);
+    }}
+    .builder-kicker {{ color:#F9C03D; font-family:'Inter',sans-serif; font-size:10px; font-weight:800; letter-spacing:1.8px; text-transform:uppercase; }}
+    .builder-title {{ color:#fff; font-family:'Space Grotesk',sans-serif; font-size:1.6rem; font-weight:900; margin:5px 0 4px; }}
+    .builder-copy {{ color:#aaa; font-family:'Inter',sans-serif; font-size:12px; line-height:1.45; margin:0; }}
+    .builder-summary {{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:12px 0; }}
+    .builder-summary-item {{ padding:11px 8px; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.07); border-radius:6px; text-align:center; }}
+    .builder-summary-value {{ color:#F9C03D; font-family:'Space Grotesk',sans-serif; font-size:1.2rem; font-weight:900; }}
+    .builder-summary-label {{ color:#777; font-family:'Inter',sans-serif; font-size:8px; font-weight:700; letter-spacing:1px; text-transform:uppercase; margin-top:4px; }}
+    .builder-section-label {{ color:#F9C03D; font-family:'Inter',sans-serif; font-size:10px; font-weight:800; letter-spacing:1.6px; margin:20px 0 8px; }}
+
     .athlete-hero {{
         position: relative; overflow: hidden; margin: 4px 0 14px; padding: 22px 18px 16px;
         border: 1px solid rgba(249,192,61,0.22); border-radius: 8px;
