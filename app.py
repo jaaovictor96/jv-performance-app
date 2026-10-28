@@ -1162,7 +1162,8 @@ def status_pagamento_aluno(row, pagamentos: pd.DataFrame) -> dict:
     else:
         vencimento_exibido = vencimento
 
-    dias = (vencimento_exibido - datetime.now().date()).days
+    dias = (vencimento_exibido - agora_brasilia().date()).days
+    bloqueado = not pago and dias < 0
     if pago:
         status = f"Em dia - próximo vencimento em {dias} dia(s)"
     elif dias < 0:
@@ -1178,8 +1179,9 @@ def status_pagamento_aluno(row, pagamentos: pd.DataFrame) -> dict:
         "dias": dias,
         "pago": pago,
         "status": status,
-        "alertar_aluno": (not pago and dias <= 5),
-        "alertar_coach": (not pago and dias <= 5),
+        "bloqueado": bloqueado,
+        "alertar_aluno": (not pago and 0 <= dias <= 3),
+        "alertar_coach": (not pago and dias <= 3),
     }
 
 def carregar_pagamentos_seguro() -> pd.DataFrame:
@@ -1534,6 +1536,42 @@ st.markdown(f"""
         text-transform: uppercase;
     }}
 
+    /* Perfil do atleta: primeira leitura da tela, pensado para uso com uma mão. */
+    .athlete-hero {{
+        position: relative; overflow: hidden; margin: 4px 0 14px; padding: 22px 18px 16px;
+        border: 1px solid rgba(249,192,61,0.22); border-radius: 8px;
+        background: linear-gradient(135deg, rgba(249,192,61,0.16), rgba(25,23,18,0.98) 56%, rgba(15,15,15,0.98));
+        box-shadow: 0 10px 30px rgba(0,0,0,0.30);
+    }}
+    .athlete-hero::after {{
+        content: 'JV'; position: absolute; right: 14px; top: -24px; color: rgba(249,192,61,0.06);
+        font-family: 'Space Grotesk', sans-serif; font-size: 8rem; font-weight: 900; line-height: 1;
+        pointer-events: none;
+    }}
+    .athlete-profile {{ display: flex; align-items: center; gap: 12px; position: relative; z-index: 1; }}
+    .athlete-avatar {{
+        width: 52px; height: 52px; flex: 0 0 52px; display: flex; align-items: center; justify-content: center;
+        color: #111; background: #F9C03D; border: 3px solid rgba(255,255,255,0.16); border-radius: 50%;
+        font-family: 'Space Grotesk', sans-serif; font-size: 16px; font-weight: 900;
+        box-shadow: 0 0 0 3px rgba(249,192,61,0.12);
+    }}
+    .athlete-name {{ color:#fff; font-family:'Space Grotesk',sans-serif; font-size:1.35rem; font-weight:900; line-height:1.05; }}
+    .athlete-caption {{ color:#aaa; font-family:'Inter',sans-serif; font-size:11px; margin-top:4px; }}
+    .athlete-status {{
+        display:inline-flex; align-items:center; gap:6px; margin-top:8px; padding:5px 8px;
+        border-radius:4px; background:rgba(249,192,61,0.12); color:#F9C03D;
+        font-family:'Inter',sans-serif; font-size:10px; font-weight:700;
+    }}
+    .athlete-status-dot {{ width:6px; height:6px; border-radius:50%; background:#F9C03D; box-shadow:0 0 7px rgba(249,192,61,.8); }}
+    .athlete-metrics {{ display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:1px; margin-top:18px; position:relative; z-index:1; background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.06); border-radius:6px; overflow:hidden; }}
+    .athlete-metric {{ min-width:0; padding:12px 6px; text-align:center; background:rgba(11,11,11,.40); }}
+    .athlete-metric-value {{ color:#fff; font-family:'Space Grotesk',sans-serif; font-size:1.35rem; font-weight:900; line-height:1; white-space:nowrap; }}
+    .athlete-metric-value.gold {{ color:#F9C03D; }}
+    .athlete-metric-label {{ color:#8B8B8B; font-family:'Inter',sans-serif; font-size:8px; font-weight:700; letter-spacing:1px; text-transform:uppercase; margin-top:6px; }}
+    .session-strip {{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin:4px 0 14px; padding:11px 13px; background:rgba(20,19,19,.94); border:1px solid rgba(255,255,255,.08); border-radius:8px; }}
+    .session-strip-title {{ color:#fff; font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+    .session-strip-detail {{ color:#F9C03D; font-family:'Inter',sans-serif; font-size:10px; font-weight:700; white-space:nowrap; }}
+
     .streak-card {{
         background: linear-gradient(135deg, rgba(249,192,61,0.10), rgba(249,192,61,0.03));
         border: 1px solid rgba(249,192,61,0.22); border-radius: 18px;
@@ -1593,7 +1631,7 @@ st.markdown(f"""
 
     .ex-card {{
         background: linear-gradient(145deg, rgba(26,25,25,0.98), rgba(20,19,19,0.98));
-        border-radius: 20px; border-left: 4px solid #F9C03D;
+        border-radius: 8px; border-left: 3px solid #F9C03D;
         padding: 22px 20px 18px; margin-bottom: 14px;
         box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04);
         animation: fadeSlideUp 0.35s ease both;
@@ -1626,7 +1664,7 @@ st.markdown(f"""
     .workout-preview {{
         background: rgba(20,19,19,0.96);
         border: 1px solid rgba(255,255,255,0.07);
-        border-radius: 14px; overflow: hidden; margin: 10px 0 14px;
+        border-radius: 8px; overflow: hidden; margin: 10px 0 14px;
         box-shadow: 0 4px 20px rgba(0,0,0,0.28);
         animation: fadeSlideUp 0.3s ease both;
     }}
@@ -1840,7 +1878,7 @@ st.markdown(f"""
         .conclusao-card,
         .coach-alert,
         .streak-card {{
-            border-radius: 14px !important;
+            border-radius: 8px !important;
             padding-left: 16px !important;
             padding-right: 16px !important;
             box-shadow: 0 3px 18px rgba(0,0,0,0.35) !important;
@@ -2452,7 +2490,7 @@ else:
             </div>
         """, unsafe_allow_html=True)
 
-        # ---- ALERTA DE PAGAMENTO ----
+        # ---- STATUS DE PAGAMENTO E CONTROLE DE ACESSO ----
         try:
             df_pag_aluno_alerta = carregar_pagamentos_seguro()
             df_u_alerta = ler_planilha('usuarios')
@@ -2460,11 +2498,23 @@ else:
             linha_pag_aluno = df_u_alerta[df_u_alerta['email'] == st.session_state.email.lower()]
             if not linha_pag_aluno.empty:
                 info_pag_aluno = status_pagamento_aluno(linha_pag_aluno.iloc[0], df_pag_aluno_alerta)
+                venc_txt = info_pag_aluno['vencimento'].strftime('%d/%m/%Y') if info_pag_aluno['vencimento'] else ''
+
+                if info_pag_aluno.get('bloqueado', False):
+                    st.markdown(
+                        "<h2 style='font-family:Space Grotesk;font-size:1.8rem;font-weight:900;line-height:1;"
+                        "margin:22px 0 8px;'>PAGAMENTO <span style='color:#E45858;'>PENDENTE</span></h2>",
+                        unsafe_allow_html=True
+                    )
+                    st.error(
+                        f"O pagamento com vencimento em {venc_txt} ainda não foi confirmado. "
+                        "O acesso à consultoria está temporariamente bloqueado."
+                    )
+                    st.info("Assim que o pagamento for confirmado pelo coach, seu acesso será liberado automaticamente.")
+                    st.stop()
+
                 if info_pag_aluno['alertar_aluno']:
-                    venc_txt = info_pag_aluno['vencimento'].strftime('%d/%m/%Y') if info_pag_aluno['vencimento'] else ''
-                    if info_pag_aluno['dias'] is not None and info_pag_aluno['dias'] < 0:
-                        texto_pag = f'Sua mensalidade venceu em {venc_txt}. Regularize para manter sua consultoria ativa.'
-                    elif info_pag_aluno['dias'] == 0:
+                    if info_pag_aluno['dias'] == 0:
                         texto_pag = 'Sua mensalidade vence hoje. Regularize para manter sua consultoria ativa.'
                     else:
                         texto_pag = f'Sua mensalidade vence em {info_pag_aluno["dias"]} dia(s), em {venc_txt}.'
@@ -2477,7 +2527,8 @@ else:
                             <div class='coach-alert-texto'>{html.escape(texto_pag)}</div>
                         </div>
                     """, unsafe_allow_html=True)
-        except:
+        except Exception:
+            # Uma falha temporária da planilha não deve bloquear o aluno indevidamente.
             pass
 
         with st.expander("⚙️ Configurações"):
@@ -2514,20 +2565,50 @@ else:
                     time.sleep(0.3)
                     st.rerun()
 
-        # ---- STREAK ----
+        # ---- RESUMO DO ATLETA ----
         streak = calcular_streak(historico_geral, st.session_state.email)
-        emoji_s, frase_s = frases_streak(streak)
+        try:
+            df_perfil = ler_planilha('usuarios')
+            df_perfil['email'] = df_perfil['email'].astype(str).str.strip().str.lower()
+            linha_perfil = df_perfil[df_perfil['email'] == st.session_state.email.lower()]
+            nome_atleta = str(linha_perfil.iloc[0].get('nome', '')).strip() if not linha_perfil.empty else ''
+        except Exception:
+            nome_atleta = ''
+        if not nome_atleta or nome_atleta.lower() == 'nan':
+            nome_atleta = st.session_state.email.split('@')[0].replace('.', ' ').title()
+
+        hoje_brasilia = agora_brasilia().date()
+        historico_perfil = historico_geral.copy()
+        ultima_sessao = None
+        sessoes_semana = 0
+        sessoes_30d = 0
+        if not historico_perfil.empty and 'data' in historico_perfil.columns:
+            historico_perfil['_data_perfil'] = parse_data_br(historico_perfil['data'])
+            datas_validas = historico_perfil['_data_perfil'].dropna()
+            if not datas_validas.empty:
+                datas_sessao = datas_validas.dt.date
+                ultima_sessao = datas_sessao.max()
+                sessoes_semana = int(datas_sessao[datas_sessao >= hoje_brasilia - timedelta(days=6)].nunique())
+                sessoes_30d = int(datas_sessao[datas_sessao >= hoje_brasilia - timedelta(days=29)].nunique())
+        dias_sem_treinar = (hoje_brasilia - ultima_sessao).days if ultima_sessao else None
+        ultima_txt = 'sem registros' if dias_sem_treinar is None else ('treinou hoje' if dias_sem_treinar == 0 else f'último treino há {dias_sem_treinar} dia(s)')
+        iniciais = ''.join([parte[0] for parte in nome_atleta.split()[:2]]).upper() or 'JV'
         st.markdown(f"""
-            <div class='streak-card'>
-                <div class='streak-emoji'>{emoji_s}</div>
-                <div>
-                    <div style='display:flex;align-items:baseline;gap:6px;'>
-                        <span class='streak-numero'>{streak}</span>
-                        <span class='streak-label'>dias seguidos</span>
+            <section class='athlete-hero'>
+                <div class='athlete-profile'>
+                    <div class='athlete-avatar'>{html.escape(iniciais)}</div>
+                    <div>
+                        <div class='athlete-name'>{html.escape(nome_atleta)}</div>
+                        <div class='athlete-caption'>Seu acompanhamento de treino</div>
+                        <div class='athlete-status'><span class='athlete-status-dot'></span>{html.escape(ultima_txt)}</div>
                     </div>
-                    <div class='streak-frase'>{frase_s}</div>
                 </div>
-            </div>
+                <div class='athlete-metrics'>
+                    <div class='athlete-metric'><div class='athlete-metric-value gold'>{sessoes_semana}</div><div class='athlete-metric-label'>sessões · semana</div></div>
+                    <div class='athlete-metric'><div class='athlete-metric-value'>{streak}</div><div class='athlete-metric-label'>dias seguidos</div></div>
+                    <div class='athlete-metric'><div class='athlete-metric-value'>{sessoes_30d}</div><div class='athlete-metric-label'>sessões · 30 dias</div></div>
+                </div>
+            </section>
         """, unsafe_allow_html=True)
 
         # ---- ALERTA IN-APP: MENSAGEM DO COACH ----
@@ -2678,7 +2759,7 @@ else:
         else:
             st.markdown(
                 "<h2 style='font-family:Space Grotesk;font-size:2rem;font-weight:900;line-height:1;margin-bottom:4px;'>"
-                "PROTOCOLO <span style='color:#F9C03D;'>DIÁRIO</span></h2>",
+                "SEU <span style='color:#F9C03D;'>TREINO</span></h2>",
                 unsafe_allow_html=True
             )
 
@@ -2981,6 +3062,10 @@ else:
                         concluidos_unicos = sorted(set(st.session_state.exercicios_concluidos))
                         pct = int((len(concluidos_unicos) / total_ex) * 100)
                         st.markdown(f"""
+                            <div class='session-strip'>
+                                <span class='session-strip-title'>{treino_nome_html}</span>
+                                <span class='session-strip-detail'>{idx_atual + 1}/{total_ex} exercícios</span>
+                            </div>
                             <div class='progress-bar-bg'>
                                 <div class='progress-bar-fill' style='width:{pct}%;'></div>
                             </div>
