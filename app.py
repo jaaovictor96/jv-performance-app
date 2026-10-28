@@ -390,43 +390,39 @@ def render_montador_treinos(df_alunos_coach):
                 key=str.lower
             )
 
-            col_origem, col_item_origem = st.columns(2)
-            with col_origem:
-                origem_montador = st.selectbox(
-                    'Começar a partir de',
-                    ['Novo protocolo', 'Protocolo atual', 'Modelo padronizado'],
-                    key=f'montador_origem_{email_vinculado}'
-                )
-            with col_item_origem:
-                if origem_montador == 'Protocolo atual':
-                    item_origem = st.selectbox(
-                        'Protocolo', nomes_protocolos or ['Nenhum protocolo cadastrado'],
-                        key=f'montador_protocolo_origem_{email_vinculado}'
+            montador_aberto = st.session_state.get('montador_email') == email_vinculado
+            with st.expander('Novo protocolo, modelo ou protocolo existente', expanded=not montador_aberto):
+                col_origem, col_item_origem = st.columns(2)
+                with col_origem:
+                    origem_montador = st.selectbox(
+                        'Começar a partir de',
+                        ['Novo protocolo', 'Protocolo atual', 'Modelo padronizado'],
+                        key=f'montador_origem_{email_vinculado}'
                     )
-                elif origem_montador == 'Modelo padronizado':
-                    item_origem = st.selectbox(
-                        'Modelo', modelos_disponiveis or ['Nenhum modelo cadastrado'],
-                        key=f'montador_modelo_origem_{email_vinculado}'
-                    )
-                else:
-                    item_origem = ''
-                    st.caption('Você começará com uma estrutura vazia.')
-
-            if st.button('Carregar no montador', key=f'carregar_montador_{email_vinculado}', use_container_width=True):
-                if origem_montador == 'Protocolo atual' and item_origem in nomes_protocolos:
-                    linhas_origem = protocolos_aluno[
-                        protocolos_aluno['treino_nome'].astype(str).str.strip() == item_origem
-                    ]
-                    iniciar_montador_treino(email_vinculado, item_origem, preparar_exercicios_editor(linhas_origem), 'protocolo')
-                elif origem_montador == 'Modelo padronizado' and item_origem in modelos_disponiveis:
-                    linhas_origem = df_modelos_montador[
-                        df_modelos_montador['modelo_nome'].astype(str).str.strip() == item_origem
-                    ]
-                    nome_treino_modelo = str(linhas_origem.iloc[0].get('treino_nome', item_origem)).strip() or item_origem
-                    iniciar_montador_treino(email_vinculado, nome_treino_modelo, preparar_exercicios_editor(linhas_origem), 'modelo')
-                else:
-                    iniciar_montador_treino(email_vinculado, 'Novo treino', pd.DataFrame(columns=COLUNAS_EDITOR_TREINO), 'novo')
-                st.rerun()
+                with col_item_origem:
+                    if origem_montador == 'Protocolo atual':
+                        item_origem = st.selectbox(
+                            'Protocolo', nomes_protocolos or ['Nenhum protocolo cadastrado'],
+                            key=f'montador_protocolo_origem_{email_vinculado}'
+                        )
+                    elif origem_montador == 'Modelo padronizado':
+                        item_origem = st.selectbox(
+                            'Modelo', modelos_disponiveis or ['Nenhum modelo cadastrado'],
+                            key=f'montador_modelo_origem_{email_vinculado}'
+                        )
+                    else:
+                        item_origem = ''
+                if st.button('Abrir no montador', key=f'carregar_montador_{email_vinculado}', use_container_width=True):
+                    if origem_montador == 'Protocolo atual' and item_origem in nomes_protocolos:
+                        linhas_origem = protocolos_aluno[protocolos_aluno['treino_nome'].astype(str).str.strip() == item_origem]
+                        iniciar_montador_treino(email_vinculado, item_origem, preparar_exercicios_editor(linhas_origem), 'protocolo')
+                    elif origem_montador == 'Modelo padronizado' and item_origem in modelos_disponiveis:
+                        linhas_origem = df_modelos_montador[df_modelos_montador['modelo_nome'].astype(str).str.strip() == item_origem]
+                        nome_treino_modelo = str(linhas_origem.iloc[0].get('treino_nome', item_origem)).strip() or item_origem
+                        iniciar_montador_treino(email_vinculado, nome_treino_modelo, preparar_exercicios_editor(linhas_origem), 'modelo')
+                    else:
+                        iniciar_montador_treino(email_vinculado, 'Novo treino', pd.DataFrame(columns=COLUNAS_EDITOR_TREINO), 'novo')
+                    st.rerun()
 
             montador_aberto = st.session_state.get('montador_email') == email_vinculado
             if not montador_aberto:
@@ -446,7 +442,6 @@ def render_montador_treinos(df_alunos_coach):
                         apagar_montador_treino()
                         st.rerun()
 
-                st.markdown("<p class='builder-section-label'>3. ADICIONE EXERCÍCIOS</p>", unsafe_allow_html=True)
                 filtro_catalogo = st.text_input(
                     'Buscar na biblioteca', placeholder='Ex.: agachamento, costas, halter...',
                     key=f'filtro_catalogo_montador_{email_vinculado}'
@@ -490,14 +485,7 @@ def render_montador_treinos(df_alunos_coach):
                 linhas_editor = normalizar_editor_treino(st.session_state.get('montador_linhas'))
                 total_series_editor = int(pd.to_numeric(linhas_editor['series'], errors='coerce').fillna(0).sum()) if not linhas_editor.empty else 0
                 total_reps_editor = int((pd.to_numeric(linhas_editor['series'], errors='coerce').fillna(0) * pd.to_numeric(linhas_editor['reps'], errors='coerce').fillna(0)).sum()) if not linhas_editor.empty else 0
-                st.markdown(f"""
-                    <div class='builder-summary'>
-                        <div class='builder-summary-item'><div class='builder-summary-value'>{len(linhas_editor)}</div><div class='builder-summary-label'>exercícios</div></div>
-                        <div class='builder-summary-item'><div class='builder-summary-value'>{total_series_editor}</div><div class='builder-summary-label'>séries</div></div>
-                        <div class='builder-summary-item'><div class='builder-summary-value'>{total_reps_editor}</div><div class='builder-summary-label'>reps planejadas</div></div>
-                    </div>
-                """, unsafe_allow_html=True)
-                st.markdown("<p class='builder-section-label'>4. ORGANIZE O PROTOCOLO</p>", unsafe_allow_html=True)
+                st.caption(f'{len(linhas_editor)} exercício(s) · {total_series_editor} séries · {total_reps_editor} repetições planejadas')
                 with st.form(f'form_editor_treino_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'):
                     linhas_editadas = st.data_editor(
                         linhas_editor,
@@ -524,45 +512,44 @@ def render_montador_treinos(df_alunos_coach):
 
                 linhas_para_duplicar = normalizar_editor_treino(st.session_state.get('montador_linhas'))
                 if not linhas_para_duplicar.empty:
-                    col_duplicar, col_btn_duplicar = st.columns([3, 1])
-                    with col_duplicar:
-                        exercicio_duplicar = st.selectbox(
-                            'Duplicar exercício no final do protocolo', linhas_para_duplicar['exercicio'].tolist(),
-                            key=f'duplicar_exercicio_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
-                        )
-                    with col_btn_duplicar:
-                        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                        duplicar_exercicio = st.button('Duplicar', key=f'btn_duplicar_{email_vinculado}', use_container_width=True)
-                    if duplicar_exercicio:
-                        copia = linhas_para_duplicar[linhas_para_duplicar['exercicio'] == exercicio_duplicar].iloc[[0]].copy()
-                        copia['ordem'] = int(linhas_para_duplicar['ordem'].max()) + 1
-                        st.session_state.montador_linhas = pd.concat([linhas_para_duplicar, copia], ignore_index=True)
-                        st.session_state.montador_versao = int(st.session_state.get('montador_versao', 0)) + 1
-                        st.rerun()
+                    with st.expander('Ferramentas do protocolo', expanded=False):
+                        col_duplicar, col_btn_duplicar = st.columns([3, 1])
+                        with col_duplicar:
+                            exercicio_duplicar = st.selectbox(
+                                'Duplicar exercício no final', linhas_para_duplicar['exercicio'].tolist(),
+                                key=f'duplicar_exercicio_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
+                            )
+                        with col_btn_duplicar:
+                            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                            duplicar_exercicio = st.button('Duplicar', key=f'btn_duplicar_{email_vinculado}', use_container_width=True)
+                        if duplicar_exercicio:
+                            copia = linhas_para_duplicar[linhas_para_duplicar['exercicio'] == exercicio_duplicar].iloc[[0]].copy()
+                            copia['ordem'] = int(linhas_para_duplicar['ordem'].max()) + 1
+                            st.session_state.montador_linhas = pd.concat([linhas_para_duplicar, copia], ignore_index=True)
+                            st.session_state.montador_versao = int(st.session_state.get('montador_versao', 0)) + 1
+                            st.rerun()
 
                 linhas_para_video = normalizar_editor_treino(st.session_state.get('montador_linhas'))
                 if not linhas_para_video.empty:
-                    opcoes_video = linhas_para_video['exercicio'].tolist()
-                    exercicio_video = st.selectbox(
-                        'Ver vídeo ou instruções do exercício', opcoes_video,
-                        key=f'video_montador_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
-                    )
-                    linha_video = linhas_para_video[linhas_para_video['exercicio'] == exercicio_video].iloc[0]
-                    instrucoes_video = str(linha_video.get('observacoes', '') or '').strip()
-                    url_video = str(linha_video.get('video_url', '') or '').strip()
-                    if instrucoes_video:
-                        st.caption(instrucoes_video)
-                    if url_video.startswith('http'):
-                        embed_video = html.escape(
-                            url_video.split('?')[0].replace('/view', '/preview').replace('/edit', '/preview'),
-                            quote=True
+                    with st.expander('Prévia e instruções de exercício', expanded=False):
+                        opcoes_video = linhas_para_video['exercicio'].tolist()
+                        exercicio_video = st.selectbox(
+                            'Exercício para consultar', opcoes_video,
+                            key=f'video_montador_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
                         )
-                        st.components.v1.html(
-                            f'<div style="position:relative;width:100%;padding-top:56.25%;overflow:hidden;border-radius:12px;background:#111;"><iframe src="{embed_video}" style="position:absolute;inset:0;width:100%;height:100%;border:0;" allowfullscreen></iframe></div>',
-                            height=260
-                        )
-                    elif not instrucoes_video:
-                        st.caption('Adicione uma observação ou vídeo para este exercício na tabela acima.')
+                        linha_video = linhas_para_video[linhas_para_video['exercicio'] == exercicio_video].iloc[0]
+                        instrucoes_video = str(linha_video.get('observacoes', '') or '').strip()
+                        url_video = str(linha_video.get('video_url', '') or '').strip()
+                        if instrucoes_video:
+                            st.caption(instrucoes_video)
+                        if url_video.startswith('http'):
+                            embed_video = html.escape(url_video.split('?')[0].replace('/view', '/preview').replace('/edit', '/preview'), quote=True)
+                            st.components.v1.html(
+                                f'<div style="position:relative;width:100%;padding-top:56.25%;overflow:hidden;border-radius:8px;background:#111;"><iframe src="{embed_video}" style="position:absolute;inset:0;width:100%;height:100%;border:0;" allowfullscreen></iframe></div>',
+                                height=260
+                            )
+                        elif not instrucoes_video:
+                            st.caption('Este exercício ainda não possui instrução ou vídeo.')
 
                 st.divider()
                 col_modelo, col_publicar, col_arquivar, col_excluir = st.columns(4)
