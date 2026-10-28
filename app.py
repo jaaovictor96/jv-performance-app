@@ -2913,7 +2913,12 @@ else:
                         )
 
                     if st.button("Descartar treino em andamento", key="descartar_rascunho", use_container_width=True):
+                        # Remove rascunhos local e remoto antes de liberar outro protocolo.
                         limpar_rascunho_treino(st.session_state.email, limpar_servidor=True)
+                        ler_planilha.clear()
+                        for chave_temporaria in list(st.session_state.keys()):
+                            if chave_temporaria.startswith(("carga_serie_", "reps_serie_")):
+                                del st.session_state[chave_temporaria]
                         st.session_state.treino_ativo = None
                         st.session_state.treino_estado_carregado = ''
                         st.session_state.cargas_sessao = {}
@@ -2922,6 +2927,8 @@ else:
                         st.session_state.ex_index = 0
                         st.session_state.treino_finalizado = False
                         st.session_state.notas_sessao = ""
+                        st.session_state.ultimo_salvamento_treino = ""
+                        st.session_state.rascunho_servidor_ok = None
                         st.rerun()
 
                     # Pré-carrega cargas históricas sem misturá-las com a carga editada hoje.
@@ -3243,31 +3250,6 @@ else:
                                     }}
                                 </script>
                             """, height=165)
-
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if st.button("−2.5", key=f"m25_{idx_atual}", use_container_width=True):
-                                st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 2.5)
-                                persistir_treino_atual(salvar_servidor=True)
-                                st.rerun()
-                        with c2:
-                            if st.button("−0.5", key=f"m05_{idx_atual}", use_container_width=True):
-                                st.session_state.cargas_sessao[chave] = max(0.0, carga_atual - 0.5)
-                                persistir_treino_atual(salvar_servidor=True)
-                                st.rerun()
-
-                        c3, c4 = st.columns(2)
-                        with c3:
-                            if st.button("+0.5", key=f"p05_{idx_atual}", use_container_width=True):
-                                st.session_state.cargas_sessao[chave] = carga_atual + 0.5
-                                persistir_treino_atual(salvar_servidor=True)
-                                st.rerun()
-                        with c4:
-                            if st.button("+2.5", key=f"p25_{idx_atual}", use_container_width=True):
-                                st.session_state.cargas_sessao[chave] = carga_atual + 2.5
-                                persistir_treino_atual(salvar_servidor=True)
-                                st.rerun()
-                        st.markdown("<br>", unsafe_allow_html=True)
 
                         eh_ultimo = (idx_atual == total_ex - 1)
 
