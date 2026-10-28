@@ -1721,6 +1721,10 @@ st.markdown(f"""
         font-size: 10px; letter-spacing: 1px; text-align: right; margin: 5px 0 14px;
     }}
 
+    .series-entry-title {{ color:#F9C03D; font-family:'Inter',sans-serif; font-size:10px; font-weight:800; letter-spacing:1.5px; margin:18px 0 8px; }}
+    .series-entry-head {{ display:grid; grid-template-columns:.34fr 1fr 1fr; gap:8px; color:#777; font-family:'Inter',sans-serif; font-size:9px; font-weight:700; letter-spacing:1px; margin:0 0 4px; text-align:center; }}
+    .series-number {{ min-height:40px; display:flex; align-items:center; justify-content:center; color:#F9C03D; font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:900; background:rgba(249,192,61,.09); border:1px solid rgba(249,192,61,.18); border-radius:6px; }}
+
     .carga-display {{ text-align: center; margin: 16px 0 12px; animation: fadeSlideUp 0.3s ease both; }}
     .carga-valor {{
         color: #FFFFFF; font-family: 'Space Grotesk', sans-serif;
@@ -2888,6 +2892,14 @@ else:
                                     st.session_state.cargas_sessao[f"carga_{idx}"] = float(cargas_salvas[nome_chave])
                                 if nome_chave in reps_salvas:
                                     st.session_state.reps_sessao[f"reps_{idx}"] = int(reps_salvas[nome_chave])
+                                series_valor_rascunho = pd.to_numeric(row.get('series'), errors='coerce')
+                                total_series_rascunho = max(1, int(series_valor_rascunho)) if pd.notna(series_valor_rascunho) else 1
+                                for numero_serie in range(total_series_rascunho):
+                                    chave_serie = f"{nome_chave}::serie_{numero_serie}"
+                                    if chave_serie in cargas_salvas:
+                                        st.session_state.cargas_sessao[f"carga_{idx}_serie_{numero_serie}"] = float(cargas_salvas[chave_serie])
+                                    if chave_serie in reps_salvas:
+                                        st.session_state.reps_sessao[f"reps_{idx}_serie_{numero_serie}"] = int(reps_salvas[chave_serie])
 
                     if rascunho_salvo and treino_rascunho == str(selecao_treino):
                         st.info(
@@ -2938,14 +2950,18 @@ else:
                             st.session_state.reps_sessao[reps_chave] = int(reps_planejadas) if pd.notna(reps_planejadas) else 0
 
                     def persistir_treino_atual(salvar_servidor=False):
-                        cargas_por_exercicio = {
-                            str(r['exercicio']).strip().lower(): st.session_state.cargas_sessao.get(f"carga_{i}", 0)
-                            for i, r in exercicios_df.iterrows()
-                        }
-                        reps_por_exercicio = {
-                            str(r['exercicio']).strip().lower(): st.session_state.reps_sessao.get(f"reps_{i}", 0)
-                            for i, r in exercicios_df.iterrows()
-                        }
+                        cargas_por_exercicio = {}
+                        reps_por_exercicio = {}
+                        for i, r in exercicios_df.iterrows():
+                            nome_chave = str(r['exercicio']).strip().lower()
+                            cargas_por_exercicio[nome_chave] = st.session_state.cargas_sessao.get(f"carga_{i}", 0)
+                            reps_por_exercicio[nome_chave] = st.session_state.reps_sessao.get(f"reps_{i}", 0)
+                            series_valor = pd.to_numeric(r.get('series'), errors='coerce')
+                            total_series = max(1, int(series_valor)) if pd.notna(series_valor) else 1
+                            for numero_serie in range(total_series):
+                                chave_serie = f"{nome_chave}::serie_{numero_serie}"
+                                cargas_por_exercicio[chave_serie] = st.session_state.cargas_sessao.get(f"carga_{i}_serie_{numero_serie}", cargas_por_exercicio[nome_chave])
+                                reps_por_exercicio[chave_serie] = st.session_state.reps_sessao.get(f"reps_{i}_serie_{numero_serie}", reps_por_exercicio[nome_chave])
                         salvar_rascunho_treino(
                             st.session_state.email,
                             selecao_treino,
@@ -3090,34 +3106,40 @@ else:
                                 st.components.v1.html(f'<div style="position:relative;width:100%;padding-top:56.25%;overflow:hidden;border-radius:12px;background:#111;"><iframe src="{embed}" style="position:absolute;inset:0;width:100%;height:100%;border:0;" allowfullscreen></iframe></div>', height=260)
 
 
-                        carga_manual_key = f"carga_manual_{idx_atual}_{carga_atual:.1f}"
-                        carga_manual = st.number_input(
-                            "Carga atual (kg)",
-                            min_value=0.0,
-                            value=float(carga_atual),
-                            step=0.5,
-                            format="%.1f",
-                            key=carga_manual_key,
-                            help="Digite a carga manualmente ou use os botões abaixo para ajustar."
-                        )
-                        if float(carga_manual) != float(carga_atual):
-                            st.session_state.cargas_sessao[chave] = float(carga_manual)
-                            persistir_treino_atual(salvar_servidor=True)
-                            st.rerun()
+                        st.markdown("<p class='series-entry-title'>REGISTRE CADA SÉRIE</p>", unsafe_allow_html=True)
+                        st.markdown("<div class='series-entry-head'><span>#</span><span>CARGA</span><span>REPS</span></div>", unsafe_allow_html=True)
+                        cargas_registradas, reps_registradas = [], []
+                        houve_alteracao_serie = False
+                        for numero_serie in range(max(1, series)):
+                            chave_carga_serie = f"carga_{idx_atual}_serie_{numero_serie}"
+                            chave_reps_serie = f"reps_{idx_atual}_serie_{numero_serie}"
+                            carga_serie_atual = float(st.session_state.cargas_sessao.get(chave_carga_serie, carga_atual))
+                            reps_serie_atual = int(st.session_state.reps_sessao.get(chave_reps_serie, reps))
+                            coluna_numero, coluna_carga, coluna_reps = st.columns([0.34, 1, 1])
+                            with coluna_numero:
+                                st.markdown(f"<div class='series-number'>{numero_serie + 1}</div>", unsafe_allow_html=True)
+                            with coluna_carga:
+                                carga_serie = st.number_input(
+                                    f"Carga da série {numero_serie + 1} (kg)", min_value=0.0, value=carga_serie_atual,
+                                    step=0.5, format="%.1f", key=f"carga_serie_{idx_atual}_{numero_serie}", label_visibility="collapsed"
+                                )
+                            with coluna_reps:
+                                reps_serie = st.number_input(
+                                    f"Repetições da série {numero_serie + 1}", min_value=0, value=reps_serie_atual,
+                                    step=1, key=f"reps_serie_{idx_atual}_{numero_serie}", label_visibility="collapsed"
+                                )
+                            if float(carga_serie) != carga_serie_atual or int(reps_serie) != reps_serie_atual:
+                                houve_alteracao_serie = True
+                            st.session_state.cargas_sessao[chave_carga_serie] = float(carga_serie)
+                            st.session_state.reps_sessao[chave_reps_serie] = int(reps_serie)
+                            cargas_registradas.append(float(carga_serie))
+                            reps_registradas.append(int(reps_serie))
 
-                        reps_chave = f"reps_{idx_atual}"
-                        reps_atuais = int(st.session_state.reps_sessao.get(reps_chave, 0))
-                        reps_realizadas = st.number_input(
-                            "Repetições realizadas",
-                            min_value=0,
-                            value=reps_atuais,
-                            step=1,
-                            key=f"reps_realizadas_{idx_atual}_{reps_atuais}"
-                        )
-                        if int(reps_realizadas) != reps_atuais:
-                            st.session_state.reps_sessao[reps_chave] = int(reps_realizadas)
+                        # A carga-resumo preserva os relatórios já existentes; o detalhe vai para a planilha.
+                        st.session_state.cargas_sessao[chave] = max(cargas_registradas, default=0.0)
+                        st.session_state.reps_sessao[f"reps_{idx_atual}"] = max(reps_registradas, default=0)
+                        if houve_alteracao_serie:
                             persistir_treino_atual(salvar_servidor=True)
-                            st.rerun()
 
                         if st.session_state.ultimo_salvamento_treino:
                             st.caption(f"Treino salvo às {st.session_state.ultimo_salvamento_treino} · horário de Brasília")
@@ -3292,6 +3314,10 @@ else:
                                             "exercicio": r['exercicio'],
                                             "carga": st.session_state.cargas_sessao.get(f"carga_{i}", 0),
                                             "reps_realizadas": st.session_state.reps_sessao.get(f"reps_{i}", 0),
+                                            "series_detalhadas": json.dumps([
+                                                {"serie": numero_serie + 1, "carga": st.session_state.cargas_sessao.get(f"carga_{i}_serie_{numero_serie}", 0), "reps": st.session_state.reps_sessao.get(f"reps_{i}_serie_{numero_serie}", 0)}
+                                                for numero_serie in range(max(1, int(pd.to_numeric(r.get('series'), errors='coerce'))) if pd.notna(pd.to_numeric(r.get('series'), errors='coerce')) else 1)
+                                            ], ensure_ascii=False),
                                             "comentario": st.session_state.notas_sessao
                                         })
                                     df_envio = pd.DataFrame(lista)
