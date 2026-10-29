@@ -510,24 +510,28 @@ def render_montador_treinos(df_alunos_coach):
                     st.success('Rascunho atualizado. O aluno ainda não vê estas alterações.')
                     st.rerun()
 
-                linhas_para_duplicar = normalizar_editor_treino(st.session_state.get('montador_linhas'))
-                if not linhas_para_duplicar.empty:
-                    with st.expander('Ferramentas do protocolo', expanded=False):
-                        col_duplicar, col_btn_duplicar = st.columns([3, 1])
-                        with col_duplicar:
-                            exercicio_duplicar = st.selectbox(
-                                'Duplicar exercício no final', linhas_para_duplicar['exercicio'].tolist(),
-                                key=f'duplicar_exercicio_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
-                            )
-                        with col_btn_duplicar:
-                            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-                            duplicar_exercicio = st.button('Duplicar', key=f'btn_duplicar_{email_vinculado}', use_container_width=True)
-                        if duplicar_exercicio:
-                            copia = linhas_para_duplicar[linhas_para_duplicar['exercicio'] == exercicio_duplicar].iloc[[0]].copy()
-                            copia['ordem'] = int(linhas_para_duplicar['ordem'].max()) + 1
-                            st.session_state.montador_linhas = pd.concat([linhas_para_duplicar, copia], ignore_index=True)
-                            st.session_state.montador_versao = int(st.session_state.get('montador_versao', 0)) + 1
-                            st.rerun()
+                linhas_para_remover = normalizar_editor_treino(st.session_state.get('montador_linhas'))
+                if not linhas_para_remover.empty:
+                    col_remover_exercicio, col_botao_remover = st.columns([3, 1])
+                    with col_remover_exercicio:
+                        exercicio_remover = st.selectbox(
+                            'Remover exercício do protocolo', linhas_para_remover['exercicio'].tolist(),
+                            key=f'remover_exercicio_{email_vinculado}_{st.session_state.get("montador_versao", 0)}'
+                        )
+                    with col_botao_remover:
+                        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+                        remover_exercicio = st.button(
+                            'Remover', key=f'btn_remover_exercicio_{email_vinculado}', use_container_width=True
+                        )
+                    if remover_exercicio:
+                        indice_remover = linhas_para_remover[
+                            linhas_para_remover['exercicio'] == exercicio_remover
+                        ].index[0]
+                        linhas_restantes = linhas_para_remover.drop(index=indice_remover).reset_index(drop=True)
+                        linhas_restantes['ordem'] = range(1, len(linhas_restantes) + 1)
+                        st.session_state.montador_linhas = linhas_restantes
+                        st.session_state.montador_versao = int(st.session_state.get('montador_versao', 0)) + 1
+                        st.rerun()
 
                 linhas_para_video = normalizar_editor_treino(st.session_state.get('montador_linhas'))
                 if not linhas_para_video.empty:
